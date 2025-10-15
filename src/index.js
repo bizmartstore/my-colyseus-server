@@ -15,7 +15,7 @@ app.get("/", (req, res) =>
 // ✅ Create HTTP + WS server
 const server = http.createServer(app);
 
-// ✅ Initialize Colyseus
+// ✅ Initialize Colyseus server
 const gameServer = new Server({
   transport: new WebSocketTransport({
     server,
@@ -25,16 +25,20 @@ const gameServer = new Server({
   seatReservationTime: 60, // ⏱ allow up to 60 seconds for slow clients
 });
 
-// ✅ Define room
-gameServer.define("mmorpg_room", MMORPGRoom);
+// ✅ Define room type and filter by mapId
+// This ensures all players with the SAME mapId share one instance.
+gameServer
+  .define("mmorpg_room", MMORPGRoom)
+  .filterBy(["mapId"]);
 
-// ✅ Start
+// ✅ Start the server
 const PORT = process.env.PORT || 2567;
 gameServer.listen(PORT).then(() => {
   console.log(`✅ Colyseus WebSocket listening on ws://localhost:${PORT}`);
   console.log(`🌐 HTTP status check: http://localhost:${PORT}/`);
 });
 
+// ✅ Graceful shutdown
 process.on("SIGINT", () => {
   console.log("🧹 Server shutting down...");
   gameServer.gracefullyShutdown();
