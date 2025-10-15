@@ -7,50 +7,34 @@ const { MMORPGRoom } = require("./rooms");
 
 const app = express();
 
-/* ============================================================
- 🏠 Basic Express route (for quick server check)
- ============================================================ */
+// ✅ Simple health check
 app.get("/", (req, res) =>
   res.send("🟢 Colyseus MMORPG server is running successfully!")
 );
 
-/* ============================================================
- ⚙️ Create HTTP + WebSocket server
- ============================================================ */
+// ✅ Create HTTP + WS server
 const server = http.createServer(app);
 
-/* ============================================================
- 🚀 Initialize Colyseus server
-  - Adds WebSocket transport
-  - Increases seat reservation time
-  - Adds heartbeat (ping) to keep connections stable
- ============================================================ */
+// ✅ Initialize Colyseus
 const gameServer = new Server({
   transport: new WebSocketTransport({
     server,
-    pingInterval: 4000,  // send ping every 4s to detect disconnects
-    pingMaxRetries: 5,   // tolerate up to 5 missed pings
+    pingInterval: 4000,
+    pingMaxRetries: 5,
   }),
-  seatReservationTime: 15, // ⏱️ give clients 15s to establish connection
+  seatReservationTime: 60, // ⏱ allow up to 60 seconds for slow clients
 });
 
-/* ============================================================
- 🏰 Define game rooms
- ============================================================ */
+// ✅ Define room
 gameServer.define("mmorpg_room", MMORPGRoom);
 
-/* ============================================================
- 🟢 Start the server
- ============================================================ */
+// ✅ Start
 const PORT = process.env.PORT || 2567;
 gameServer.listen(PORT).then(() => {
   console.log(`✅ Colyseus WebSocket listening on ws://localhost:${PORT}`);
   console.log(`🌐 HTTP status check: http://localhost:${PORT}/`);
 });
 
-/* ============================================================
- 🧩 Graceful shutdown (optional, for cloud hosting)
- ============================================================ */
 process.on("SIGINT", () => {
   console.log("🧹 Server shutting down...");
   gameServer.gracefullyShutdown();

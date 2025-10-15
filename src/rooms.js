@@ -2,7 +2,7 @@
 const { Room } = require("colyseus");
 
 /* ============================================================
- 🧩 Character database (from your Characters sheet)
+ 🧩 Character database
  ============================================================ */
 const characterDatabase = {
   C001: {
@@ -79,14 +79,14 @@ class MMORPGRoom extends Room {
     console.log("🌍 MMORPGRoom created!");
     this.setState({ players: {} });
 
-    /* 🧭 Handle player movement */
+    /* 🧭 Handle movement */
     this.onMessage("move", (client, message) => {
       const player = this.state.players[client.sessionId];
-      if (player) {
-        player.x = message.x;
-        player.y = message.y;
-        player.dir = message.dir;
-      }
+      if (!player) return;
+
+      player.x = message.x;
+      player.y = message.y;
+      player.dir = message.dir;
 
       this.broadcast("move", {
         sessionId: client.sessionId,
@@ -96,7 +96,7 @@ class MMORPGRoom extends Room {
       });
     });
 
-    /* ⚔️ Handle attack broadcasts */
+    /* ⚔️ Handle attack */
     this.onMessage("attack", (client, message) => {
       this.broadcast("attack", {
         sessionId: client.sessionId,
@@ -108,23 +108,27 @@ class MMORPGRoom extends Room {
   onJoin(client, options) {
     console.log("✨ Player joined:", client.sessionId, options);
 
-    // 🧾 Extract and validate data from join options
-    const characterID = options.CharacterID || options.characterID || "C001";
-    const charData = characterDatabase[characterID] || characterDatabase["C001"];
+    // ✅ Assign defaults if missing
+    const safeEmail =
+      options.email ||
+      `guest_${Math.random().toString(36).substring(2, 8)}@game.local`;
+    const safeName = options.playerName || "Guest";
+    const safeCharacterID = options.CharacterID || "C001";
+    const charData =
+      characterDatabase[safeCharacterID] || characterDatabase["C001"];
 
-    // 🗺️ Default map + position
     const mapId = Number(options.mapId) || 1;
     const posX = Number(options.x) || 200;
     const posY = Number(options.y) || 200;
 
-    // 🧍 Store complete player state
+    // ✅ Store player
     this.state.players[client.sessionId] = {
       id: client.sessionId,
-      email: options.email || "guest",
-      playerName: options.playerName || "Traveler",
-      CharacterID: characterID,
+      email: safeEmail,
+      playerName: safeName,
+      CharacterID: safeCharacterID,
       characterClass: charData.Class,
-      mapId: mapId,
+      mapId,
       x: posX,
       y: posY,
       dir: options.dir || "down",
@@ -135,7 +139,6 @@ class MMORPGRoom extends Room {
       speed: charData.Speed,
       critDamage: charData.CritDamage,
 
-      // 🖼️ Send sprite URLs directly to client
       sprites: {
         idleFront: charData.ImageURL_IdleFront,
         idleBack: charData.ImageURL_IdleBack,
@@ -146,10 +149,12 @@ class MMORPGRoom extends Room {
       },
     };
 
-    // 🎯 Send existing players to the new player
+    console.log(`✅ ${safeName} (${safeEmail}) joined as ${charData.Class}`);
+
+    // Send all current players to this one
     client.send("current_players", this.state.players);
 
-    // 📢 Notify all others about new player
+    // Notify everyone else
     this.broadcast(
       "player_joined",
       { id: client.sessionId, player: this.state.players[client.sessionId] },
@@ -157,7 +162,7 @@ class MMORPGRoom extends Room {
     );
   }
 
-  onLeave(client, consented) {
+  onLeave(client) {
     console.log("👋 Player left:", client.sessionId);
     delete this.state.players[client.sessionId];
     this.broadcast("player_left", { id: client.sessionId });
