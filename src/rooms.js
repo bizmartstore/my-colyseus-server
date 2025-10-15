@@ -15,44 +15,62 @@ class MMORPGRoom extends Room {
         player.dir = message.dir;
       }
 
-      // Broadcast to all other clients
-      this.broadcast("move", { sessionId: client.sessionId, ...message });
+      // 🧭 Broadcast movement to everyone (including self)
+      this.broadcast("move", {
+        sessionId: client.sessionId,
+        x: message.x,
+        y: message.y,
+        dir: message.dir
+      });
     });
 
     // ⚔️ Handle attacks
     this.onMessage("attack", (client, message) => {
-      this.broadcast("attack", { sessionId: client.sessionId, ...message });
+      this.broadcast("attack", {
+        sessionId: client.sessionId,
+        ...message
+      });
     });
-
-    // 🧠 Optionally handle skill usage, chat, etc.
-    // this.onMessage("skill", (client, message) => { ... });
   }
 
   onJoin(client, options) {
-    console.log("✨ Player joined:", client.sessionId);
+    console.log("✨ Player joined:", client.sessionId, options);
 
-    // Register new player in state
+    // 🧍 Register new player
     this.state.players[client.sessionId] = {
+      id: client.sessionId,
       email: options.email || "guest",
-      x: options.x || 0,
-      y: options.y || 0,
+      x: options.x || 200,
+      y: options.y || 200,
       dir: options.dir || "down",
       hp: 100,
       mp: 50,
-      class: options.class || "novice"
+      class: options.class || "novice",
+      name: options.playerName || "Traveler"
     };
 
-    // Notify everyone
-    this.broadcast("join", {
-      sessionId: client.sessionId,
-      player: this.state.players[client.sessionId]
-    });
+    // 🎯 Send existing players to the joining client
+    client.send("current_players", this.state.players);
+
+    // 📢 Notify everyone else that a new player joined
+    this.broadcast(
+      "player_joined",
+      {
+        id: client.sessionId,
+        player: this.state.players[client.sessionId]
+      },
+      { except: client }
+    );
   }
 
-  onLeave(client) {
+  onLeave(client, consented) {
     console.log("👋 Player left:", client.sessionId);
-    this.broadcast("leave", { sessionId: client.sessionId });
+
+    // 🗑️ Remove from state
     delete this.state.players[client.sessionId];
+
+    // 📢 Notify everyone
+    this.broadcast("player_left", { id: client.sessionId });
   }
 
   onDispose() {
