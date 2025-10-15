@@ -3,7 +3,7 @@ const http = require("http");
 const express = require("express");
 const { Server } = require("colyseus");
 const { WebSocketTransport } = require("@colyseus/ws-transport");
-const { WorldRoom } = require("./rooms");
+const { MMORPGRoom } = require("./rooms");
 
 const app = express();
 
@@ -13,13 +13,13 @@ app.get("/", (req, res) => res.send("🟢 Colyseus server is running successfull
 // Create HTTP + WebSocket server
 const server = http.createServer(app);
 
-// Initialize Colyseus
+// Initialize Colyseus server with WebSocket transport
 const gameServer = new Server({
-  transport: new WebSocketTransport({ server })
+  transport: new WebSocketTransport({ server }),
 });
 
-// Define the game room
-gameServer.define("world", WorldRoom);
+// ✅ Define your MMORPG room
+gameServer.define("mmorpg_room", MMORPGRoom);
 
 // Start the server
 const PORT = process.env.PORT || 2567;

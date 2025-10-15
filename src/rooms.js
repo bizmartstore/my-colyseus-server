@@ -1,12 +1,12 @@
 // src/rooms.js
 const { Room } = require("colyseus");
 
-class WorldRoom extends Room {
+class MMORPGRoom extends Room {
   onCreate(options) {
-    console.log("🌍 WorldRoom created!", options);
+    console.log("🌍 MMORPGRoom created!", options);
     this.setState({ players: {} });
 
-    // When a player sends movement data
+    // 📦 Handle player movement messages
     this.onMessage("move", (client, message) => {
       const player = this.state.players[client.sessionId];
       if (player) {
@@ -15,40 +15,49 @@ class WorldRoom extends Room {
         player.dir = message.dir;
       }
 
-      // Send this move to everyone else
+      // Broadcast to all other clients
       this.broadcast("move", { sessionId: client.sessionId, ...message });
     });
 
-    // When a player sends an attack
+    // ⚔️ Handle attacks
     this.onMessage("attack", (client, message) => {
-      // Just broadcast the attack to everyone for now
       this.broadcast("attack", { sessionId: client.sessionId, ...message });
     });
+
+    // 🧠 Optionally handle skill usage, chat, etc.
+    // this.onMessage("skill", (client, message) => { ... });
   }
 
-  // When a player joins
   onJoin(client, options) {
     console.log("✨ Player joined:", client.sessionId);
+
+    // Register new player in state
     this.state.players[client.sessionId] = {
       email: options.email || "guest",
-      x: 0,
-      y: 0,
-      dir: "down"
+      x: options.x || 0,
+      y: options.y || 0,
+      dir: options.dir || "down",
+      hp: 100,
+      mp: 50,
+      class: options.class || "novice"
     };
 
-    // Tell everyone a new player joined
+    // Notify everyone
     this.broadcast("join", {
       sessionId: client.sessionId,
-      email: this.state.players[client.sessionId].email
+      player: this.state.players[client.sessionId]
     });
   }
 
-  // When a player leaves
   onLeave(client) {
     console.log("👋 Player left:", client.sessionId);
     this.broadcast("leave", { sessionId: client.sessionId });
     delete this.state.players[client.sessionId];
   }
+
+  onDispose() {
+    console.log("🧹 MMORPGRoom disposed.");
+  }
 }
 
-module.exports = { WorldRoom };
+module.exports = { MMORPGRoom };
