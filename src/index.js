@@ -11,11 +11,11 @@ const app = express();
    ✅ Health Check Endpoint
    ============================================================ */
 app.get("/", (req, res) => {
-  res.send("🟢 Colyseus MMORPG server is running successfully!");
+  res.send("🟢 Colyseus MMORPG server is running successfully on Render!");
 });
 
 /* ============================================================
-   ⚙️ Create HTTP + WS server
+   ⚙️ Create HTTP + WS Server
    ============================================================ */
 const server = http.createServer(app);
 
@@ -24,7 +24,7 @@ const server = http.createServer(app);
    ============================================================ */
 const gameServer = new Server({
   transport: new WebSocketTransport({
-    server,
+    server, // Use the same HTTP server Render provides
     pingInterval: 4000,
     pingMaxRetries: 5,
   }),
@@ -32,24 +32,25 @@ const gameServer = new Server({
 });
 
 /* ============================================================
-   🌍 Define one global MMORPG room (no filter)
+   🌍 Define MMORPG Room (shared world, filtered by mapId)
    ============================================================ */
-// We remove `.filterBy(["mapId"])` to have a shared world.
 gameServer.define("mmorpg_room", MMORPGRoom);
 
-console.log("🌍 Room 'mmorpg_room' defined (all players share one world).");
+console.log("🌍 Room 'mmorpg_room' defined (shared room, visibility by mapId).");
 
 /* ============================================================
-   🎮 Start Listening
+   🎮 Start Listening (Render-compatible)
    ============================================================ */
 const PORT = process.env.PORT || 2567;
 
-gameServer.listen(PORT).then(() => {
-  console.log(`✅ WebSocket running on ws://localhost:${PORT}`);
-  console.log(`🌐 HTTP check: http://localhost:${PORT}/`);
+// ✅ IMPORTANT: Use server.listen, not gameServer.listen
+server.listen(PORT, () => {
+  console.log(`✅ Server running on port ${PORT}`);
+  console.log(`🌐 Health check: https://mmorpg-colyseus-server-0u0g.onrender.com/`);
+  console.log(`🔗 WebSocket endpoint: wss://mmorpg-colyseus-server-0u0g.onrender.com`);
   console.log("-----------------------------------------------------------");
-  console.log("💡 Each player joins one global room.");
-  console.log("   But visibility is filtered by mapId (server-side).");
+  console.log("💡 Each player joins a single shared room,");
+  console.log("   and visibility is handled by mapId inside MMORPGRoom.");
   console.log("-----------------------------------------------------------");
 });
 
