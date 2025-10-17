@@ -84,21 +84,21 @@ class MMORPGRoom extends Room {
       const player = this.state.players[client.sessionId];
       if (!player) return;
 
-      // Update server state
       player.x = message.x;
       player.y = message.y;
       player.dir = message.dir;
 
-      // 🔄 Broadcast only to players in the same map
+      // 🔄 Send to players in the same map only
       for (const [sessionId, other] of Object.entries(this.state.players)) {
         if (other.mapId === player.mapId && sessionId !== client.sessionId) {
           const target = this.clients.find(c => c.sessionId === sessionId);
           if (target) {
-            target.send("move", {
-              sessionId: client.sessionId,
+            target.send("player_move", {
+              id: client.sessionId,
               x: message.x,
               y: message.y,
               dir: message.dir,
+              mapId: player.mapId,
             });
           }
         }
@@ -117,16 +117,28 @@ class MMORPGRoom extends Room {
           if (target) {
             target.send("attack", {
               sessionId: client.sessionId,
+              mapId: player.mapId,
               ...message,
             });
           }
         }
       }
     });
+
+    /* 📨 Handle manual player list requests */
+    this.onMessage("request_players", (client, msg) => {
+      const requester = this.state.players[client.sessionId];
+      if (!requester) return;
+      const sameMapPlayers = {};
+      for (const [id, p] of Object.entries(this.state.players)) {
+        if (p.mapId === requester.mapId) sameMapPlayers[id] = p;
+      }
+      client.send("players_snapshot", sameMapPlayers);
+    });
   }
 
   /* ============================================================
-     🧍 Player joins the room
+     🧍 Player joins
      ============================================================ */
   onJoin(client, options) {
     console.log("✨ Player joined:", client.sessionId, options);
@@ -160,7 +172,6 @@ class MMORPGRoom extends Room {
       defense: charData.Defense,
       speed: charData.Speed,
       critDamage: charData.CritDamage,
-
       sprites: {
         idleFront: charData.ImageURL_IdleFront,
         idleBack: charData.ImageURL_IdleBack,
@@ -180,7 +191,7 @@ class MMORPGRoom extends Room {
     for (const [id, other] of Object.entries(this.state.players)) {
       if (other.mapId === mapId) sameMapPlayers[id] = other;
     }
-    client.send("current_players", sameMapPlayers);
+    client.send("players_snapshot", sameMapPlayers); // ✅ fixed message name
 
     // 🔔 Notify others in the same map
     for (const [id, other] of Object.entries(this.state.players)) {
@@ -220,9 +231,6 @@ class MMORPGRoom extends Room {
     delete this.state.players[client.sessionId];
   }
 
-  /* ============================================================
-     🧹 Dispose
-     ============================================================ */
   onDispose() {
     console.log("🧹 MMORPGRoom disposed.");
   }
