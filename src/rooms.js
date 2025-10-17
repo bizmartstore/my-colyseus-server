@@ -72,7 +72,7 @@ const characterDatabase = {
 };
 
 /* ============================================================
- 🏰 MMORPG Room
+ 🏰 MMORPG Room — Global Room, Map-based Visibility
  ============================================================ */
 class MMORPGRoom extends Room {
   onCreate(options) {
@@ -84,31 +84,53 @@ class MMORPGRoom extends Room {
       const player = this.state.players[client.sessionId];
       if (!player) return;
 
+      // Update server state
       player.x = message.x;
       player.y = message.y;
       player.dir = message.dir;
 
-      this.broadcast("move", {
-        sessionId: client.sessionId,
-        x: message.x,
-        y: message.y,
-        dir: message.dir,
-      });
+      // 🔄 Broadcast only to players in the same map
+      for (const [sessionId, other] of Object.entries(this.state.players)) {
+        if (other.mapId === player.mapId && sessionId !== client.sessionId) {
+          const target = this.clients.find(c => c.sessionId === sessionId);
+          if (target) {
+            target.send("move", {
+              sessionId: client.sessionId,
+              x: message.x,
+              y: message.y,
+              dir: message.dir,
+            });
+          }
+        }
+      }
     });
 
     /* ⚔️ Handle attack */
     this.onMessage("attack", (client, message) => {
-      this.broadcast("attack", {
-        sessionId: client.sessionId,
-        ...message,
-      });
+      const player = this.state.players[client.sessionId];
+      if (!player) return;
+
+      // Only send attack events to players in the same map
+      for (const [sessionId, other] of Object.entries(this.state.players)) {
+        if (other.mapId === player.mapId && sessionId !== client.sessionId) {
+          const target = this.clients.find(c => c.sessionId === sessionId);
+          if (target) {
+            target.send("attack", {
+              sessionId: client.sessionId,
+              ...message,
+            });
+          }
+        }
+      }
     });
   }
 
+  /* ============================================================
+     🧍 Player joins the room
+     ============================================================ */
   onJoin(client, options) {
     console.log("✨ Player joined:", client.sessionId, options);
 
-    // ✅ Assign defaults if missing
     const safeEmail =
       options.email ||
       `guest_${Math.random().toString(36).substring(2, 8)}@game.local`;
@@ -121,7 +143,7 @@ class MMORPGRoom extends Room {
     const posX = Number(options.x) || 200;
     const posY = Number(options.y) || 200;
 
-    // ✅ Store player
+    // Store player
     this.state.players[client.sessionId] = {
       id: client.sessionId,
       email: safeEmail,
@@ -149,25 +171,58 @@ class MMORPGRoom extends Room {
       },
     };
 
-    console.log(`✅ ${safeName} (${safeEmail}) joined as ${charData.Class}`);
-
-    // Send all current players to this one
-    client.send("current_players", this.state.players);
-
-    // Notify everyone else
-    this.broadcast(
-      "player_joined",
-      { id: client.sessionId, player: this.state.players[client.sessionId] },
-      { except: client }
+    console.log(
+      `✅ ${safeName} (${safeEmail}) joined Map ${mapId} as ${charData.Class}`
     );
+
+    // 📨 Send all current players (same map only)
+    const sameMapPlayers = {};
+    for (const [id, other] of Object.entries(this.state.players)) {
+      if (other.mapId === mapId) sameMapPlayers[id] = other;
+    }
+    client.send("current_players", sameMapPlayers);
+
+    // 🔔 Notify others in the same map
+    for (const [id, other] of Object.entries(this.state.players)) {
+      if (other.mapId === mapId && id !== client.sessionId) {
+        const target = this.clients.find(c => c.sessionId === id);
+        if (target) {
+          target.send("player_joined", {
+            id: client.sessionId,
+            player: this.state.players[client.sessionId],
+          });
+        }
+      }
+    }
   }
 
+  /* ============================================================
+     👋 Player leaves
+     ============================================================ */
   onLeave(client) {
-    console.log("👋 Player left:", client.sessionId);
+    const player = this.state.players[client.sessionId];
+    if (!player) return;
+
+    console.log(
+      `👋 Player left: ${client.sessionId} (${player.playerName}) from Map ${player.mapId}`
+    );
+
+    // Notify others in same map only
+    for (const [id, other] of Object.entries(this.state.players)) {
+      if (other.mapId === player.mapId && id !== client.sessionId) {
+        const target = this.clients.find(c => c.sessionId === id);
+        if (target) {
+          target.send("player_left", { id: client.sessionId });
+        }
+      }
+    }
+
     delete this.state.players[client.sessionId];
-    this.broadcast("player_left", { id: client.sessionId });
   }
 
+  /* ============================================================
+     🧹 Dispose
+     ============================================================ */
   onDispose() {
     console.log("🧹 MMORPGRoom disposed.");
   }
