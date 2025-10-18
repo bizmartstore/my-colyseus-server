@@ -79,60 +79,74 @@ class MMORPGRoom extends Room {
     console.log("🌍 MMORPGRoom created!");
     this.setState({ players: {} });
 
-    /* 🧭 Handle movement */
+    /* ============================================================
+       🧭 Handle movement (✅ FIXED)
+       ============================================================ */
     this.onMessage("move", (client, message) => {
       const player = this.state.players[client.sessionId];
       if (!player) return;
 
+      // 🧠 Update player's stored position
       player.x = message.x;
       player.y = message.y;
       player.dir = message.dir;
 
-      // 🔄 Send to players in the same map only
-      for (const [sessionId, other] of Object.entries(this.state.players)) {
-        if (other.mapId === player.mapId && sessionId !== client.sessionId) {
-          const target = this.clients.find(c => c.sessionId === sessionId);
-          if (target) {
-            target.send("player_move", {
-              id: client.sessionId,
-              x: message.x,
-              y: message.y,
-              dir: message.dir,
-              mapId: player.mapId,
-            });
-          }
+      // ✅ DEBUG LOG: confirm server received move
+      console.log(
+        `◀️ Move from ${player.playerName} (${client.sessionId}) — x:${message.x}, y:${message.y}, dir:${message.dir}, map:${player.mapId}`
+      );
+
+      // ✅ Broadcast move to all others in same map
+      const payload = {
+        id: client.sessionId,
+        x: message.x,
+        y: message.y,
+        dir: message.dir,
+        mapId: player.mapId,
+      };
+
+      // Broadcast only to players in same map
+      this.clients.forEach((c) => {
+        const other = this.state.players[c.sessionId];
+        if (c.sessionId !== client.sessionId && other?.mapId === player.mapId) {
+          c.send("player_move", payload);
         }
-      }
+      });
     });
 
-    /* ⚔️ Handle attack */
+    /* ============================================================
+       ⚔️ Handle attack
+       ============================================================ */
     this.onMessage("attack", (client, message) => {
       const player = this.state.players[client.sessionId];
       if (!player) return;
 
-      // Only send attack events to players in the same map
-      for (const [sessionId, other] of Object.entries(this.state.players)) {
-        if (other.mapId === player.mapId && sessionId !== client.sessionId) {
-          const target = this.clients.find(c => c.sessionId === sessionId);
-          if (target) {
-            target.send("attack", {
-              sessionId: client.sessionId,
-              mapId: player.mapId,
-              ...message,
-            });
-          }
+      const payload = {
+        sessionId: client.sessionId,
+        mapId: player.mapId,
+        ...message,
+      };
+
+      this.clients.forEach((c) => {
+        const other = this.state.players[c.sessionId];
+        if (c.sessionId !== client.sessionId && other?.mapId === player.mapId) {
+          c.send("attack", payload);
         }
-      }
+      });
     });
 
-    /* 📨 Handle manual player list requests */
-    this.onMessage("request_players", (client, msg) => {
+    /* ============================================================
+       📨 Handle manual player list requests
+       ============================================================ */
+    this.onMessage("request_players", (client) => {
       const requester = this.state.players[client.sessionId];
       if (!requester) return;
+
       const sameMapPlayers = {};
       for (const [id, p] of Object.entries(this.state.players)) {
         if (p.mapId === requester.mapId) sameMapPlayers[id] = p;
       }
+
       client.send("players_snapshot", sameMapPlayers);
     });
   }
@@ -155,7 +169,6 @@ class MMORPGRoom extends Room {
     const posX = Number(options.x) || 200;
     const posY = Number(options.y) || 200;
 
-    // Store player
     this.state.players[client.sessionId] = {
       id: client.sessionId,
       email: safeEmail,
@@ -186,25 +199,23 @@ class MMORPGRoom extends Room {
       `✅ ${safeName} (${safeEmail}) joined Map ${mapId} as ${charData.Class}`
     );
 
-    // 📨 Send all current players (same map only)
+    // 📨 Send current players (same map)
     const sameMapPlayers = {};
     for (const [id, other] of Object.entries(this.state.players)) {
       if (other.mapId === mapId) sameMapPlayers[id] = other;
     }
-    client.send("players_snapshot", sameMapPlayers); // ✅ fixed message name
+    client.send("players_snapshot", sameMapPlayers);
 
-    // 🔔 Notify others in the same map
-    for (const [id, other] of Object.entries(this.state.players)) {
-      if (other.mapId === mapId && id !== client.sessionId) {
-        const target = this.clients.find(c => c.sessionId === id);
-        if (target) {
-          target.send("player_joined", {
-            id: client.sessionId,
-            player: this.state.players[client.sessionId],
-          });
-        }
+    // 🔔 Notify others
+    this.clients.forEach((c) => {
+      const other = this.state.players[c.sessionId];
+      if (c.sessionId !== client.sessionId && other?.mapId === mapId) {
+        c.send("player_joined", {
+          id: client.sessionId,
+          player: this.state.players[client.sessionId],
+        });
       }
-    }
+    });
   }
 
   /* ============================================================
@@ -218,15 +229,12 @@ class MMORPGRoom extends Room {
       `👋 Player left: ${client.sessionId} (${player.playerName}) from Map ${player.mapId}`
     );
 
-    // Notify others in same map only
-    for (const [id, other] of Object.entries(this.state.players)) {
-      if (other.mapId === player.mapId && id !== client.sessionId) {
-        const target = this.clients.find(c => c.sessionId === id);
-        if (target) {
-          target.send("player_left", { id: client.sessionId });
-        }
+    this.clients.forEach((c) => {
+      const other = this.state.players[c.sessionId];
+      if (c.sessionId !== client.sessionId && other?.mapId === player.mapId) {
+        c.send("player_left", { id: client.sessionId });
       }
-    }
+    });
 
     delete this.state.players[client.sessionId];
   }
