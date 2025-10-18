@@ -161,7 +161,7 @@ class MMORPGRoom extends Room {
       const chatPayload = {
         sender: player.email,
         name: player.playerName,
-        text: String(message.text).substring(0, 300), // anti-spam
+        text: String(message.text).substring(0, 300),
         mapId: player.mapId,
         ts: Date.now(),
       };
@@ -175,6 +175,49 @@ class MMORPGRoom extends Room {
           c.send("chat", chatPayload);
         }
       });
+    });
+
+    /* ============================================================
+       🗺️ Handle map change (fix for ghost duplicates)
+       ============================================================ */
+    this.onMessage("change_map", (client, message) => {
+      const player = this.state.players[client.sessionId];
+      if (!player) return;
+
+      const oldMap = player.mapId;
+      const newMap = Number(message.newMapId) || oldMap;
+      if (newMap === oldMap) return;
+
+      console.log(`🌍 ${player.playerName} moved from Map ${oldMap} → ${newMap}`);
+
+      // Update server-side player map
+      player.mapId = newMap;
+
+      // Notify old map players to remove this player
+      this.clients.forEach((c) => {
+        const other = this.state.players[c.sessionId];
+        if (other?.mapId === oldMap) {
+          c.send("player_left", { id: client.sessionId });
+        }
+      });
+
+      // Notify new map players to add this player
+      this.clients.forEach((c) => {
+        const other = this.state.players[c.sessionId];
+        if (other?.mapId === newMap && c.sessionId !== client.sessionId) {
+          c.send("player_joined", {
+            id: client.sessionId,
+            player: this.state.players[client.sessionId],
+          });
+        }
+      });
+
+      // Send fresh snapshot to this player for new map
+      const sameMapPlayers = {};
+      for (const [id, p] of Object.entries(this.state.players)) {
+        if (p.mapId === newMap) sameMapPlayers[id] = p;
+      }
+      client.send("players_snapshot", sameMapPlayers);
     });
   }
 
