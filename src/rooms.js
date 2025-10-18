@@ -80,42 +80,42 @@ class MMORPGRoom extends Room {
     this.setState({ players: {} });
 
     /* ============================================================
-       🧭 Handle movement (✅ FIXED)
+       🧭 Handle movement (✅ Server-Authoritative Fix)
        ============================================================ */
     this.onMessage("move", (client, message) => {
       const player = this.state.players[client.sessionId];
       if (!player) return;
 
-      // 🧠 Update player's stored position
+      // 🧠 Update player's authoritative position
       player.x = message.x;
       player.y = message.y;
       player.dir = message.dir;
 
-      // ✅ DEBUG LOG: confirm server received move
       console.log(
-        `◀️ Move from ${player.playerName} (${client.sessionId}) — x:${message.x}, y:${message.y}, dir:${message.dir}, map:${player.mapId}`
+        `📦 [MOVE] ${player.playerName} (${client.sessionId}) — x:${message.x}, y:${message.y}, dir:${message.dir}, map:${player.mapId}`
       );
 
-      // ✅ Broadcast move to all others in same map
+      // ✅ Create authoritative payload
       const payload = {
         id: client.sessionId,
-        x: message.x,
-        y: message.y,
-        dir: message.dir,
+        x: player.x,
+        y: player.y,
+        dir: player.dir,
         mapId: player.mapId,
+        playerName: player.playerName,
       };
 
-      // Broadcast only to players in same map
+      // ✅ Broadcast to ALL players (including sender) in same map
       this.clients.forEach((c) => {
         const other = this.state.players[c.sessionId];
-        if (c.sessionId !== client.sessionId && other?.mapId === player.mapId) {
+        if (other?.mapId === player.mapId) {
           c.send("player_move", payload);
         }
       });
     });
 
     /* ============================================================
-       ⚔️ Handle attack
+       ⚔️ Handle attacks
        ============================================================ */
     this.onMessage("attack", (client, message) => {
       const player = this.state.players[client.sessionId];
@@ -127,16 +127,17 @@ class MMORPGRoom extends Room {
         ...message,
       };
 
+      // Broadcast attack to all in same map
       this.clients.forEach((c) => {
         const other = this.state.players[c.sessionId];
-        if (c.sessionId !== client.sessionId && other?.mapId === player.mapId) {
+        if (other?.mapId === player.mapId) {
           c.send("attack", payload);
         }
       });
     });
 
     /* ============================================================
-       📨 Handle manual player list requests
+       📨 Handle manual player snapshot requests
        ============================================================ */
     this.onMessage("request_players", (client) => {
       const requester = this.state.players[client.sessionId];
@@ -199,14 +200,14 @@ class MMORPGRoom extends Room {
       `✅ ${safeName} (${safeEmail}) joined Map ${mapId} as ${charData.Class}`
     );
 
-    // 📨 Send current players (same map)
+    // 📨 Send snapshot of current players on same map
     const sameMapPlayers = {};
     for (const [id, other] of Object.entries(this.state.players)) {
       if (other.mapId === mapId) sameMapPlayers[id] = other;
     }
     client.send("players_snapshot", sameMapPlayers);
 
-    // 🔔 Notify others
+    // 🔔 Notify others about the new player
     this.clients.forEach((c) => {
       const other = this.state.players[c.sessionId];
       if (c.sessionId !== client.sessionId && other?.mapId === mapId) {
@@ -229,9 +230,10 @@ class MMORPGRoom extends Room {
       `👋 Player left: ${client.sessionId} (${player.playerName}) from Map ${player.mapId}`
     );
 
+    // Notify others in same map
     this.clients.forEach((c) => {
       const other = this.state.players[c.sessionId];
-      if (c.sessionId !== client.sessionId && other?.mapId === player.mapId) {
+      if (other?.mapId === player.mapId) {
         c.send("player_left", { id: client.sessionId });
       }
     });
@@ -239,6 +241,9 @@ class MMORPGRoom extends Room {
     delete this.state.players[client.sessionId];
   }
 
+  /* ============================================================
+     🧹 Room disposed
+     ============================================================ */
   onDispose() {
     console.log("🧹 MMORPGRoom disposed.");
   }
