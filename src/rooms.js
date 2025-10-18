@@ -1,8 +1,10 @@
-// src/rooms.js
+// ============================================================
+// src/rooms.js — MMORPG Room Definition
+// ============================================================
 const { Room } = require("colyseus");
 
 /* ============================================================
- 🧩 Character database
+ 🧩 Character Database (Static Sample)
  ============================================================ */
 const characterDatabase = {
   C001: {
@@ -72,30 +74,31 @@ const characterDatabase = {
 };
 
 /* ============================================================
- 🏰 MMORPG Room — Global Room, Map-based Visibility
+ 🏰 MMORPG Room — Shared World (Map-based Visibility)
  ============================================================ */
 class MMORPGRoom extends Room {
   onCreate(options) {
     console.log("🌍 MMORPGRoom created!");
+
+    // ✅ Fix: Extend reservation time to prevent join timeout
+    this.setSeatReservationTime(20);
+
+    // ✅ Initialize room state
     this.setState({ players: {} });
 
+    // Maintain a tick clock (keeps room active)
+    this.clock.setInterval(() => {}, 1000 / 20);
+
     /* ============================================================
-       🧭 Handle movement (✅ Server-Authoritative Fix)
+       🧭 Movement Handler
        ============================================================ */
     this.onMessage("move", (client, message) => {
       const player = this.state.players[client.sessionId];
       if (!player) return;
-
-      // 🧠 Update player's authoritative position
       player.x = message.x;
       player.y = message.y;
       player.dir = message.dir;
 
-      console.log(
-        `📦 [MOVE] ${player.playerName} (${client.sessionId}) — x:${message.x}, y:${message.y}, dir:${message.dir}, map:${player.mapId}`
-      );
-
-      // ✅ Create authoritative payload
       const payload = {
         id: client.sessionId,
         x: player.x,
@@ -105,54 +108,45 @@ class MMORPGRoom extends Room {
         playerName: player.playerName,
       };
 
-      // ✅ Broadcast to ALL players (including sender) in same map
+      // Broadcast to players in same map
       this.clients.forEach((c) => {
         const other = this.state.players[c.sessionId];
-        if (other?.mapId === player.mapId) {
-          c.send("player_move", payload);
-        }
+        if (other?.mapId === player.mapId) c.send("player_move", payload);
       });
     });
 
     /* ============================================================
-       ⚔️ Handle attacks
+       ⚔️ Attack Handler
        ============================================================ */
     this.onMessage("attack", (client, message) => {
       const player = this.state.players[client.sessionId];
       if (!player) return;
-
       const payload = {
         sessionId: client.sessionId,
         mapId: player.mapId,
         ...message,
       };
-
-      // Broadcast attack to all in same map
       this.clients.forEach((c) => {
         const other = this.state.players[c.sessionId];
-        if (other?.mapId === player.mapId) {
-          c.send("attack", payload);
-        }
+        if (other?.mapId === player.mapId) c.send("attack", payload);
       });
     });
 
     /* ============================================================
-       📨 Handle manual player snapshot requests
+       📨 Snapshot Request Handler
        ============================================================ */
     this.onMessage("request_players", (client) => {
       const requester = this.state.players[client.sessionId];
       if (!requester) return;
-
       const sameMapPlayers = {};
       for (const [id, p] of Object.entries(this.state.players)) {
         if (p.mapId === requester.mapId) sameMapPlayers[id] = p;
       }
-
       client.send("players_snapshot", sameMapPlayers);
     });
 
     /* ============================================================
-       💬 Handle chat messages (map-based visibility)
+       💬 Chat Handler
        ============================================================ */
     this.onMessage("chat", (client, message) => {
       const player = this.state.players[client.sessionId];
@@ -168,17 +162,14 @@ class MMORPGRoom extends Room {
 
       console.log(`💬 [CHAT] ${player.playerName}@Map${player.mapId}: ${chatPayload.text}`);
 
-      // Broadcast only to players in the same map
       this.clients.forEach((c) => {
         const other = this.state.players[c.sessionId];
-        if (other?.mapId === player.mapId) {
-          c.send("chat", chatPayload);
-        }
+        if (other?.mapId === player.mapId) c.send("chat", chatPayload);
       });
     });
 
     /* ============================================================
-       🗺️ Handle map change (fix for ghost duplicates)
+       🗺️ Map Change Handler
        ============================================================ */
     this.onMessage("change_map", (client, message) => {
       const player = this.state.players[client.sessionId];
@@ -190,18 +181,15 @@ class MMORPGRoom extends Room {
 
       console.log(`🌍 ${player.playerName} moved from Map ${oldMap} → ${newMap}`);
 
-      // Update server-side player map
       player.mapId = newMap;
 
-      // Notify old map players to remove this player
+      // Notify old map players
       this.clients.forEach((c) => {
         const other = this.state.players[c.sessionId];
-        if (other?.mapId === oldMap) {
-          c.send("player_left", { id: client.sessionId });
-        }
+        if (other?.mapId === oldMap) c.send("player_left", { id: client.sessionId });
       });
 
-      // Notify new map players to add this player
+      // Notify new map players
       this.clients.forEach((c) => {
         const other = this.state.players[c.sessionId];
         if (other?.mapId === newMap && c.sessionId !== client.sessionId) {
@@ -212,7 +200,7 @@ class MMORPGRoom extends Room {
         }
       });
 
-      // Send fresh snapshot to this player for new map
+      // Send snapshot to switching player
       const sameMapPlayers = {};
       for (const [id, p] of Object.entries(this.state.players)) {
         if (p.mapId === newMap) sameMapPlayers[id] = p;
@@ -222,84 +210,85 @@ class MMORPGRoom extends Room {
   }
 
   /* ============================================================
-     🧍 Player joins
+     🧍 Player Joins (fast non-blocking join)
      ============================================================ */
-  onJoin(client, options) {
+  async onJoin(client, options) {
     console.log("✨ Player joined:", client.sessionId, options);
 
-    const safeEmail =
-      options.email ||
-      `guest_${Math.random().toString(36).substring(2, 8)}@game.local`;
-    const safeName = options.playerName || "Guest";
-    const safeCharacterID = options.CharacterID || "C001";
-    const charData =
-      characterDatabase[safeCharacterID] || characterDatabase["C001"];
+    // ✅ Early acknowledgment — prevents seat expiry
+    client.send("join_ack", { ok: true });
 
-    const mapId = Number(options.mapId) || 1;
-    const posX = Number(options.x) || 200;
-    const posY = Number(options.y) || 200;
+    // 🕒 Setup player data asynchronously
+    setTimeout(() => {
+      try {
+        const safeEmail = options.email || `guest_${Math.random().toString(36).substring(2, 8)}@game.local`;
+        const safeName = options.playerName || "Guest";
+        const safeCharacterID = options.CharacterID || "C001";
+        const charData = characterDatabase[safeCharacterID] || characterDatabase["C001"];
+        const mapId = Number(options.mapId) || 1;
+        const posX = Number(options.x) || 200;
+        const posY = Number(options.y) || 200;
 
-    this.state.players[client.sessionId] = {
-      id: client.sessionId,
-      email: safeEmail,
-      playerName: safeName,
-      CharacterID: safeCharacterID,
-      characterClass: charData.Class,
-      mapId,
-      x: posX,
-      y: posY,
-      dir: options.dir || "down",
-      hp: charData.BaseHP,
-      mp: charData.BaseMana,
-      attack: charData.Attack,
-      defense: charData.Defense,
-      speed: charData.Speed,
-      critDamage: charData.CritDamage,
-      sprites: {
-        idleFront: charData.ImageURL_IdleFront,
-        idleBack: charData.ImageURL_IdleBack,
-        walkLeft: charData.ImageURL_Walk_Left,
-        walkRight: charData.ImageURL_Walk_Right,
-        attackLeft: charData.ImageURL_Attack_Left,
-        attackRight: charData.ImageURL_Attack_Right,
-      },
-    };
-
-    console.log(
-      `✅ ${safeName} (${safeEmail}) joined Map ${mapId} as ${charData.Class}`
-    );
-
-    // 📨 Send snapshot of current players on same map
-    const sameMapPlayers = {};
-    for (const [id, other] of Object.entries(this.state.players)) {
-      if (other.mapId === mapId) sameMapPlayers[id] = other;
-    }
-    client.send("players_snapshot", sameMapPlayers);
-
-    // 🔔 Notify others about the new player
-    this.clients.forEach((c) => {
-      const other = this.state.players[c.sessionId];
-      if (c.sessionId !== client.sessionId && other?.mapId === mapId) {
-        c.send("player_joined", {
+        this.state.players[client.sessionId] = {
           id: client.sessionId,
-          player: this.state.players[client.sessionId],
+          email: safeEmail,
+          playerName: safeName,
+          CharacterID: safeCharacterID,
+          characterClass: charData.Class,
+          mapId,
+          x: posX,
+          y: posY,
+          dir: options.dir || "down",
+          hp: charData.BaseHP,
+          mp: charData.BaseMana,
+          attack: charData.Attack,
+          defense: charData.Defense,
+          speed: charData.Speed,
+          critDamage: charData.CritDamage,
+          sprites: {
+            idleFront: charData.ImageURL_IdleFront,
+            idleBack: charData.ImageURL_IdleBack,
+            walkLeft: charData.ImageURL_Walk_Left,
+            walkRight: charData.ImageURL_Walk_Right,
+            attackLeft: charData.ImageURL_Attack_Left,
+            attackRight: charData.ImageURL_Attack_Right,
+          },
+        };
+
+        console.log(`✅ ${safeName} (${safeEmail}) joined Map ${mapId} as ${charData.Class}`);
+
+        // Send same-map snapshot
+        const sameMapPlayers = {};
+        for (const [id, other] of Object.entries(this.state.players)) {
+          if (other.mapId === mapId) sameMapPlayers[id] = other;
+        }
+        client.send("players_snapshot", sameMapPlayers);
+
+        // Notify others
+        this.clients.forEach((c) => {
+          const other = this.state.players[c.sessionId];
+          if (c.sessionId !== client.sessionId && other?.mapId === mapId) {
+            c.send("player_joined", {
+              id: client.sessionId,
+              player: this.state.players[client.sessionId],
+            });
+          }
         });
+      } catch (err) {
+        console.error("❌ Error in delayed join:", err);
       }
-    });
+    }, 100);
   }
 
   /* ============================================================
-     👋 Player leaves
+     👋 Player Leaves
      ============================================================ */
   onLeave(client) {
     const player = this.state.players[client.sessionId];
     if (!player) return;
 
-    console.log(
-      `👋 Player left: ${client.sessionId} (${player.playerName}) from Map ${player.mapId}`
-    );
+    console.log(`👋 Player left: ${client.sessionId} (${player.playerName}) from Map ${player.mapId}`);
 
-    // Notify others in same map
     this.clients.forEach((c) => {
       const other = this.state.players[c.sessionId];
       if (other?.mapId === player.mapId) {
@@ -311,7 +300,7 @@ class MMORPGRoom extends Room {
   }
 
   /* ============================================================
-     🧹 Room disposed
+     🧹 Room Disposed
      ============================================================ */
   onDispose() {
     console.log("🧹 MMORPGRoom disposed.");

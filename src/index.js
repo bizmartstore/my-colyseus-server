@@ -1,4 +1,7 @@
-// src/index.js
+// ============================================================
+// src/index.js — Colyseus MMORPG Server Entry
+// ============================================================
+
 const http = require("http");
 const express = require("express");
 const { Server } = require("colyseus");
@@ -24,11 +27,11 @@ const server = http.createServer(app);
    ============================================================ */
 const gameServer = new Server({
   transport: new WebSocketTransport({
-    server, // Use the same HTTP server Render provides
+    server, // same HTTP server (Render-compatible)
     pingInterval: 4000,
     pingMaxRetries: 5,
   }),
-  seatReservationTime: 60,
+  seatReservationTime: 60, // global safety window for joining
 });
 
 /* ============================================================
@@ -43,14 +46,14 @@ console.log("🌍 Room 'mmorpg_room' defined (shared room, visibility by mapId).
    ============================================================ */
 const PORT = process.env.PORT || 2567;
 
-// ✅ IMPORTANT: Use server.listen, not gameServer.listen
+// ✅ Use server.listen for Render’s web service
 server.listen(PORT, () => {
   console.log(`✅ Server running on port ${PORT}`);
   console.log(`🌐 Health check: https://mmorpg-colyseus-server-0u0g.onrender.com/`);
   console.log(`🔗 WebSocket endpoint: wss://mmorpg-colyseus-server-0u0g.onrender.com`);
   console.log("-----------------------------------------------------------");
-  console.log("💡 Each player joins a single shared room,");
-  console.log("   and visibility is handled by mapId inside MMORPGRoom.");
+  console.log("💡 Each player joins a shared room.");
+  console.log("   Map-based visibility handled inside MMORPGRoom.");
   console.log("-----------------------------------------------------------");
 });
 
