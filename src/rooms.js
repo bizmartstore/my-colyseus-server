@@ -150,6 +150,32 @@ class MMORPGRoom extends Room {
 
       client.send("players_snapshot", sameMapPlayers);
     });
+
+    /* ============================================================
+       💬 Handle chat messages (map-based visibility)
+       ============================================================ */
+    this.onMessage("chat", (client, message) => {
+      const player = this.state.players[client.sessionId];
+      if (!player || !message.text) return;
+
+      const chatPayload = {
+        sender: player.email,
+        name: player.playerName,
+        text: String(message.text).substring(0, 300), // anti-spam
+        mapId: player.mapId,
+        ts: Date.now(),
+      };
+
+      console.log(`💬 [CHAT] ${player.playerName}@Map${player.mapId}: ${chatPayload.text}`);
+
+      // Broadcast only to players in the same map
+      this.clients.forEach((c) => {
+        const other = this.state.players[c.sessionId];
+        if (other?.mapId === player.mapId) {
+          c.send("chat", chatPayload);
+        }
+      });
+    });
   }
 
   /* ============================================================
