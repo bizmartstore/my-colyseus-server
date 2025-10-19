@@ -157,6 +157,14 @@ class MMORPGRoom extends Room {
     this.clock.setInterval(() => this.updateMonsterMovement(), 2000);
 
     /* ============================================================
+       🕐 Keep-alive Ping Handler (Prevents Disconnects)
+       ============================================================ */
+    this.onMessage("ping", (client, data) => {
+      // Respond to ping with a small "pong" to keep socket open
+      client.send("pong", { ok: true, t: Date.now() });
+    });
+
+    /* ============================================================
        🚶 Player Movement
        ============================================================ */
     this.onMessage("move", (client, msg) => {
@@ -214,59 +222,39 @@ class MMORPGRoom extends Room {
           player.exp += monster.exp;
           player.coins += monster.coins;
 
-          // ✅ Safe, non-blocking reward with timeout + catch (moved off main handler)
+          // ✅ Safe reward logic (unchanged)
           if (player.email && player.email !== "unknown") {
             const url = `${REWARD_ENDPOINT}&email=${encodeURIComponent(player.email)}&monsterId=${monster.id}`;
-
-            // schedule background task so attack handler finishes quickly
             this.clock.setTimeout(async () => {
               try {
-                // simple timeout wrapper using Promise.race to avoid hung fetch
                 const fetchPromise = fetch(url);
                 const timeoutPromise = new Promise((_, reject) =>
                   setTimeout(() => reject(new Error("reward_fetch_timeout")), 5000)
                 );
 
                 const res = await Promise.race([fetchPromise, timeoutPromise]).catch(e => {
-                  console.warn("⚠️ Reward fetch failed (caught):", e && e.message ? e.message : e);
+                  console.warn("⚠️ Reward fetch failed (caught):", e?.message || e);
                   return null;
                 });
 
-                if (!res) {
-                  console.warn("⚠️ Reward fetch returned no response.");
-                  return;
-                }
+                if (!res) return;
+                if (!res.ok) return console.warn(`⚠️ Reward endpoint returned HTTP ${res.status}`);
 
-                if (!res.ok) {
-                  console.warn(`⚠️ Reward endpoint returned HTTP ${res.status}`);
-                  return;
-                }
-
-                // parse JSON safely if needed
-                try {
-                  const body = await res.json().catch((e) => {
-                    console.warn("⚠️ reward response JSON parse failed:", e);
-                    return null;
+                const body = await res.json().catch(() => null);
+                if (body) {
+                  this.safeBroadcastToMap(player.mapId, "playerReward", {
+                    email: player.email,
+                    gainedExp: body.gainedExp,
+                    gainedCoins: body.gainedCoins,
+                    exp: body.exp,
+                    maxExp: body.maxExp,
+                    mapId: player.mapId,
                   });
-                  if (body) {
-                    // broadcast reward info to map (optional and safe)
-                    this.safeBroadcastToMap(player.mapId, "playerReward", {
-                      email: player.email,
-                      gainedExp: body.gainedExp,
-                      gainedCoins: body.gainedCoins,
-                      exp: body.exp,
-                      maxExp: body.maxExp,
-                      mapId: player.mapId,
-                    });
-                  } else {
-                    console.log(`✅ Reward call completed for ${player.email} (no JSON payload)`);
-                  }
-                } catch (e) {
-                  console.warn("⚠️ unexpected error parsing reward response:", e);
+                } else {
+                  console.log(`✅ Reward call completed for ${player.email} (no JSON payload)`);
                 }
               } catch (e) {
-                console.warn("⚠️ reward background task caught error:", e && e.stack ? e.stack : e);
-                // never throw — keep errors contained
+                console.warn("⚠️ reward background task caught error:", e?.stack || e);
               }
             }, 50);
           }
@@ -275,7 +263,7 @@ class MMORPGRoom extends Room {
           this.clock.setTimeout(() => this.respawnMonster(monster), 5000);
         }
       } catch (err) {
-        console.error("❌ attack_monster crashed:", err && err.stack ? err.stack : err);
+        console.error("❌ attack_monster crashed:", err?.stack || err);
       } finally {
         console.log("◀ attack_monster end", { sessionId: client.sessionId, monsterHp: this.state.monsters?.[msg.monsterId]?.hp });
       }
