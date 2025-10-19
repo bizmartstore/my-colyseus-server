@@ -279,19 +279,40 @@ class MMORPGRoom extends Room {
     });
 
     /* ============================================================
-       📨 Manual Player Snapshot Request
-       ============================================================ */
-    this.onMessage("request_players", (client) => {
-      const requester = this.state.players[client.sessionId];
-      if (!requester) return;
+   📨 Manual Player Snapshot Request
+   ============================================================ */
+this.onMessage("request_players", (client) => {
+  const requester = this.state.players[client.sessionId];
+  if (!requester) return;
 
-      const sameMapPlayers = {};
-      for (const [id, p] of Object.entries(this.state.players)) {
-        if (p.mapId === requester.mapId) sameMapPlayers[id] = p;
-      }
-      client.send("players_snapshot", sameMapPlayers);
-    });
+  const sameMapPlayers = {};
+  for (const [id, p] of Object.entries(this.state.players)) {
+    if (p.mapId === requester.mapId) sameMapPlayers[id] = p;
   }
+  client.send("players_snapshot", sameMapPlayers);
+});
+
+/* ============================================================
+   🧩 Compatibility Fix – Prevent client disconnects
+   ============================================================ */
+this.onMessage("pong", (client, data) => {
+  // just acknowledge the ping-pong (prevent warning)
+  // console.log(`🏓 Pong received from ${client.sessionId}`);
+});
+
+this.onMessage("monsterUpdate", (client, data) => {
+  // prevent disconnection when client sends this
+  const m = this.state.monsters?.[data.monsterId];
+  if (m) {
+    m.hp = data.hp ?? m.hp;
+  }
+  // console.log(`🧩 monsterUpdate ignored on server: ${data.monsterId}`);
+});
+
+this.onMessage("playerReward", (client, data) => {
+  // safely ignore this (client already handles rewards visually)
+  // console.log(`🎁 playerReward ignored for ${data?.email}`);
+});
 
   /* ============================================================
      🧍 Player Join
@@ -443,5 +464,12 @@ class MMORPGRoom extends Room {
     console.log("🧹 MMORPGRoom disposed.");
   }
 }
+
+
+
+
+
+
+
 
 module.exports = { MMORPGRoom };
