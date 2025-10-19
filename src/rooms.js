@@ -183,34 +183,46 @@ class MMORPGRoom extends Room {
        ⚔️ Player Attack (vs Monsters)
        ============================================================ */
     this.onMessage("attack_monster", async (client, msg) => {
-      const player = this.state.players?.[client.sessionId];
-      const monster = this.state.monsters?.[msg.monsterId];
-      if (!player || !monster || monster.hp <= 0) return;
+  const player = this.state.players?.[client.sessionId];
+  const monster = this.state.monsters?.[String(msg.monsterId)];
+  if (!player || !monster || monster.hp <= 0) return;
 
-      const baseDamage = Math.max(1, (player.attack || 1) - (monster.defense || 0));
-      const crit = Math.random() < 0.1;
-      const totalDamage = Math.floor(baseDamage * (crit ? 1.5 : 1));
-      monster.hp = Math.max(0, monster.hp - totalDamage);
+  const baseDamage = Math.max(1, (player.attack || 1) - (monster.defense || 0));
+  const crit = Math.random() < (player.critChance ? player.critChance/100 : 0.1);
+  const totalDamage = Math.floor(baseDamage * (crit ? (player.critDamage || 1.5) : 1));
 
-      this.safeBroadcastToMap(player.mapId, "monster_hit", {
-        monsterId: monster.id,
-        hp: monster.hp,
-        damage: totalDamage,
-        crit,
-        attacker: player.playerName,
-      });
+  monster.hp = Math.max(0, monster.hp - totalDamage);
 
-      if (monster.hp <= 0) {
-        this.safeBroadcastToMap(player.mapId, "monster_dead", {
-          monsterId: monster.id,
-          coins: monster.coins,
-          exp: monster.exp,
-        });
-        player.exp = (player.exp || 0) + monster.exp;
-        player.coins = (player.coins || 0) + monster.coins;
-        this.clock.setTimeout(() => this.respawnMonster(monster), 5000);
-      }
+  // --- NEW: mark monster as aggro'd toward the attacker ---
+  monster.state = monster.hp > 0 ? "aggro" : "dead";
+  monster.target = client.sessionId;            // target is the attacker's sessionId
+  monster.lastAggroAt = Date.now();
+
+  // broadcast hit to players on same map
+  this.safeBroadcastToMap(player.mapId, "monster_hit", {
+    monsterId: monster.id,
+    hp: monster.hp,
+    damage: totalDamage,
+    crit,
+    attacker: player.playerName,
+  });
+
+  if (monster.hp <= 0) {
+    this.safeBroadcastToMap(player.mapId, "monster_dead", {
+      monsterId: monster.id,
+      coins: monster.coins,
+      exp: monster.exp,
     });
+    player.exp = (player.exp || 0) + monster.exp;
+    player.coins = (player.coins || 0) + monster.coins;
+
+    // schedule respawn (existing behavior)
+    this.clock.setTimeout(() => this.respawnMonster(monster), 5000);
+    // clear aggro/target on death
+    monster.target = null;
+    monster.state = "dead";
+  }
+});
 
     /* ============================================================
        ⚔️ Player Attack (vs Players)
@@ -362,33 +374,82 @@ class MMORPGRoom extends Room {
   }
 
   /* ============================================================
-     🧟 Monster Logic
+     🧟 Monster Logic (Aggro + Smart Movement)
      ============================================================ */
   spawnMonsters() {
-    this.monsterTemplates.forEach((t) => (this.state.monsters[t.id] = { ...t }));
+    this.monsterTemplates.forEach((t) => {
+      this.state.monsters[t.id] = { 
+        ...t,
+        state: "idle",
+        target: null,
+        lastAggroAt: 0
+      };
+    });
     console.log(`🧟 Spawned ${Object.keys(this.state.monsters).length} monsters`);
   }
 
   updateMonsterMovement() {
     try {
       const lightMonsters = [];
+
       for (const m of Object.values(this.state.monsters)) {
-        if (m.hp <= 0) continue;
-        if (Math.random() < 0.5) {
-          m.dir = Math.random() < 0.5 ? "left" : "right";
-          m.state = "walk";
-          m.x += m.dir === "left" ? -30 : 30;
-        } else m.state = "idle";
+        // --- Dead monsters don't move ---
+        if (m.hp <= 0) {
+          lightMonsters.push({
+            id: m.id, x: m.x, y: m.y, dir: m.dir, state: "dead", hp: m.hp, mapId: m.mapId
+          });
+          continue;
+        }
+
+        // --- Check if monster currently has an aggro target ---
+        if (m.state === "aggro" && m.target && this.state.players[m.target]) {
+          const target = this.state.players[m.target];
+          if (!target || target.mapId !== m.mapId) {
+            // target left map or disconnected
+            m.state = "idle";
+            m.target = null;
+          } else {
+            // 🧭 Move toward player
+            const dx = target.x - m.x;
+            const dy = target.y - m.y;
+            const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+            const step = Math.min(30, Math.max(10, m.speed || 10));
+
+            m.x += (dx / dist) * step;
+            m.y += (dy / dist) * step;
+            m.dir = Math.abs(dx) > Math.abs(dy) ? (dx < 0 ? "left" : "right") : (dy < 0 ? "up" : "down");
+
+            // drop aggro if target is far or idle too long
+            if (dist > 800 || Date.now() - (m.lastAggroAt || 0) > 30000) {
+              m.state = "idle";
+              m.target = null;
+            }
+          }
+        } 
+        else {
+          // --- Normal random movement for idle monsters ---
+          if (Math.random() < 0.5) {
+            m.dir = Math.random() < 0.5 ? "left" : "right";
+            m.state = "walk";
+            m.x += m.dir === "left" ? -30 : 30;
+          } else {
+            m.state = "idle";
+          }
+        }
+
         lightMonsters.push({
           id: m.id,
-          x: m.x,
-          y: m.y,
+          x: Math.round(m.x),
+          y: Math.round(m.y),
           dir: m.dir,
           state: m.state,
           hp: m.hp,
           mapId: m.mapId,
+          target: m.target || null
         });
       }
+
+      // ✅ Only broadcast lightweight monster data
       this.safeBroadcast("monsters_update", lightMonsters);
     } catch (err) {
       console.error("⚠️ updateMonsterMovement failed:", err);
@@ -397,15 +458,20 @@ class MMORPGRoom extends Room {
 
   respawnMonster(monster) {
     monster.hp = monster.maxHP;
+    monster.state = "idle";
+    monster.target = null;
+    monster.lastAggroAt = 0;
     monster.x += Math.random() * 100 - 50;
     monster.y += Math.random() * 60 - 30;
-    monster.state = "idle";
+
     this.safeBroadcastToMap(monster.mapId, "monster_respawn", {
       id: monster.id,
-      x: monster.x,
-      y: monster.y,
+      x: Math.round(monster.x),
+      y: Math.round(monster.y),
       hp: monster.hp,
     });
+
+    console.log(`🧟‍♂️ Monster ${monster.name} respawned at (${Math.round(monster.x)}, ${Math.round(monster.y)})`);
   }
 
   /* ============================================================
