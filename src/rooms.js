@@ -131,48 +131,56 @@ const characterDatabase = {
 };
 
 /* ============================================================
-   🏰 MMORPG Room Definition (Multi-map Ready)
-   ============================================================ */
+ 🏰 MMORPG Room Definition (Multi-map Ready, Monster + Player)
+ ============================================================ */
 class MMORPGRoom extends Room {
   async onCreate() {
     console.log("🌍 MMORPGRoom created!");
     this.setSeatReservationTime(20);
     this.setState({ players: {}, monsters: {} });
 
-    // ✅ Load monsters
+    /* ============================================================
+       📜 Load and Spawn Monsters
+       ============================================================ */
     this.monsterTemplates = await loadMonstersFromSheet();
     console.log(`📜 Loaded ${this.monsterTemplates.length} monsters`);
     this.spawnMonsters();
 
-    // 🧭 Update movement every 2s (lightweight broadcast)
+    // 🧭 Lightweight monster movement update every 2s
     this.clock.setInterval(() => this.updateMonsterMovement(), 2000);
 
     /* ============================================================
-       🕐 Keep-alive Ping Handler (Prevents Disconnects)
+       🕐 Keep-alive Ping Handler
        ============================================================ */
     this.onMessage("ping", (client) => {
       client.send("pong", { ok: true, t: Date.now() });
     });
 
     /* ============================================================
-       🚶 Player Movement (Map-specific)
+       🚶 Player Movement (Authoritative, Map-Safe)
        ============================================================ */
     this.onMessage("move", (client, msg) => {
       const p = this.state.players[client.sessionId];
       if (!p) return;
+
       p.x = msg.x;
       p.y = msg.y;
       p.dir = msg.dir;
-      this.safeBroadcastToMap(p.mapId, "player_move", {
+
+      const payload = {
         id: client.sessionId,
         x: p.x,
         y: p.y,
         dir: p.dir,
-      });
+        mapId: p.mapId,
+        playerName: p.playerName,
+      };
+
+      this.safeBroadcastToMap(p.mapId, "player_move", payload);
     });
 
     /* ============================================================
-       ⚔️ Player Attack — Map-safe & Non-blocking
+       ⚔️ Player Attack (vs Monsters)
        ============================================================ */
     this.onMessage("attack_monster", async (client, msg) => {
       const player = this.state.players?.[client.sessionId];
@@ -198,59 +206,161 @@ class MMORPGRoom extends Room {
           coins: monster.coins,
           exp: monster.exp,
         });
-        player.exp += monster.exp;
-        player.coins += monster.coins;
+        player.exp = (player.exp || 0) + monster.exp;
+        player.coins = (player.coins || 0) + monster.coins;
         this.clock.setTimeout(() => this.respawnMonster(monster), 5000);
       }
+    });
+
+    /* ============================================================
+       ⚔️ Player Attack (vs Players)
+       ============================================================ */
+    this.onMessage("attack", (client, message) => {
+      const player = this.state.players[client.sessionId];
+      if (!player) return;
+
+      const payload = {
+        sessionId: client.sessionId,
+        mapId: player.mapId,
+        ...message,
+      };
+
+      this.safeBroadcastToMap(player.mapId, "attack", payload);
+    });
+
+    /* ============================================================
+       💬 Chat System (Map-based)
+       ============================================================ */
+    this.onMessage("chat", (client, message) => {
+      const player = this.state.players[client.sessionId];
+      if (!player || !message.text) return;
+
+      const chatPayload = {
+        sender: player.email,
+        name: player.playerName,
+        text: String(message.text).substring(0, 300),
+        mapId: player.mapId,
+        ts: Date.now(),
+      };
+
+      console.log(`💬 [CHAT] ${player.playerName}@Map${player.mapId}: ${chatPayload.text}`);
+      this.safeBroadcastToMap(player.mapId, "chat", chatPayload);
+    });
+
+    /* ============================================================
+       🗺️ Map Change (No Ghost Duplicates)
+       ============================================================ */
+    this.onMessage("change_map", (client, message) => {
+      const player = this.state.players[client.sessionId];
+      if (!player) return;
+
+      const oldMap = player.mapId;
+      const newMap = Number(message.newMapId) || oldMap;
+      if (newMap === oldMap) return;
+
+      console.log(`🌍 ${player.playerName} moved from Map ${oldMap} → ${newMap}`);
+      player.mapId = newMap;
+
+      // Remove from old map
+      this.safeBroadcastToMap(oldMap, "player_left", { id: client.sessionId });
+
+      // Add to new map
+      this.safeBroadcastToMap(newMap, "player_joined", {
+        id: client.sessionId,
+        player,
+      });
+
+      // Send fresh snapshot
+      const sameMapPlayers = {};
+      for (const [id, p] of Object.entries(this.state.players)) {
+        if (p.mapId === newMap) sameMapPlayers[id] = p;
+      }
+      client.send("players_snapshot", sameMapPlayers);
+    });
+
+    /* ============================================================
+       📨 Manual Player Snapshot Request
+       ============================================================ */
+    this.onMessage("request_players", (client) => {
+      const requester = this.state.players[client.sessionId];
+      if (!requester) return;
+
+      const sameMapPlayers = {};
+      for (const [id, p] of Object.entries(this.state.players)) {
+        if (p.mapId === requester.mapId) sameMapPlayers[id] = p;
+      }
+      client.send("players_snapshot", sameMapPlayers);
     });
   }
 
   /* ============================================================
-     🧍 Player Join / Leave (Map-aware)
+     🧍 Player Join
      ============================================================ */
-  async onJoin(client, options) {
-    const char = characterDatabase[options.CharacterID] || characterDatabase["C001"];
-    const mapId = Number(options.mapId) || 101;
+  onJoin(client, options) {
+    console.log("✨ Player joined:", client.sessionId, options);
 
-    const newPlayer = {
+    const safeEmail = options.email || `guest_${Math.random().toString(36).substring(2, 8)}@game.local`;
+    const safeName = options.playerName || "Guest";
+    const safeCharacterID = options.CharacterID || "C001";
+    const charData = characterDatabase[safeCharacterID] || characterDatabase["C001"];
+    const mapId = Number(options.mapId) || 1;
+    const posX = Number(options.x) || 200;
+    const posY = Number(options.y) || 200;
+
+    this.state.players[client.sessionId] = {
       id: client.sessionId,
-      playerName: options.playerName || "Guest",
-      email: options.email || "unknown",
+      email: safeEmail,
+      playerName: safeName,
+      CharacterID: safeCharacterID,
+      characterClass: charData.Class,
       mapId,
-      x: 200,
-      y: 200,
-      attack: char.Attack,
-      defense: char.Defense,
-      hp: char.BaseHP,
-      mp: char.BaseMana,
+      x: posX,
+      y: posY,
+      dir: options.dir || "down",
+      hp: charData.BaseHP,
+      mp: charData.BaseMana,
+      attack: charData.Attack,
+      defense: charData.Defense,
+      speed: charData.Speed,
+      critDamage: charData.CritDamage,
       exp: 0,
       coins: 0,
+      sprites: {
+        idleFront: charData.ImageURL_IdleFront,
+        idleBack: charData.ImageURL_IdleBack,
+        walkLeft: charData.ImageURL_Walk_Left,
+        walkRight: charData.ImageURL_Walk_Right,
+        attackLeft: charData.ImageURL_Attack_Left,
+        attackRight: charData.ImageURL_Attack_Right,
+      },
     };
 
-    this.state.players[client.sessionId] = newPlayer;
+    console.log(`✅ ${safeName} (${safeEmail}) joined Map ${mapId} as ${charData.Class}`);
 
-    // 👋 Send confirmation & monsters
-    client.send("join_ack", { ok: true });
-    client.send("monsters_snapshot", this.state.monsters);
-
-    // 👀 Send list of players currently in the same map
-    const sameMapPlayers = Object.values(this.state.players).filter(
-      (p) => p.mapId === mapId && p.id !== client.sessionId
-    );
+    // Send snapshot of players in same map
+    const sameMapPlayers = {};
+    for (const [id, other] of Object.entries(this.state.players)) {
+      if (other.mapId === mapId) sameMapPlayers[id] = other;
+    }
     client.send("players_snapshot", sameMapPlayers);
 
-    // 📢 Notify others on the same map
-    this.safeBroadcastToMap(mapId, "player_joined", newPlayer);
-
-    console.log(`✅ ${options.playerName} joined map ${mapId}`);
+    // Notify others
+    this.safeBroadcastToMap(mapId, "player_joined", {
+      id: client.sessionId,
+      player: this.state.players[client.sessionId],
+    });
   }
 
+  /* ============================================================
+     👋 Player Leave
+     ============================================================ */
   onLeave(client) {
-    const p = this.state.players[client.sessionId];
-    if (!p) return;
+    const player = this.state.players[client.sessionId];
+    if (!player) return;
+
+    console.log(`👋 Player left: ${player.playerName} (${client.sessionId})`);
+    this.safeBroadcastToMap(player.mapId, "player_left", { id: client.sessionId });
     delete this.state.players[client.sessionId];
-    this.safeBroadcastToMap(p.mapId, "player_left", { id: client.sessionId });
-    console.log(`👋 ${p.playerName} left map ${p.mapId}.`);
   }
 
   /* ============================================================
@@ -306,7 +416,13 @@ class MMORPGRoom extends Room {
   safeBroadcastToMap(mapId, event, data) {
     for (const c of this.clients) {
       const p = this.state.players[c.sessionId];
-      if (p?.mapId === mapId) c.send(event, data);
+      if (p?.mapId === mapId) {
+        try {
+          c.send(event, data);
+        } catch (err) {
+          console.warn(`⚠️ Failed to send ${event} to ${c.sessionId}:`, err);
+        }
+      }
     }
   }
 
@@ -320,6 +436,9 @@ class MMORPGRoom extends Room {
     }
   }
 
+  /* ============================================================
+     🧹 Room Disposal
+     ============================================================ */
   onDispose() {
     console.log("🧹 MMORPGRoom disposed.");
   }
