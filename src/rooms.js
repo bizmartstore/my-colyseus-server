@@ -154,7 +154,7 @@ class MMORPGRoom extends Room {
     /* ============================================================
        Player Attack → Damage Monsters
        ============================================================ */
-    this.onMessage("attack", (client, msg) => {
+    this.onMessage("attack_monster", (client, msg) => {
       const player = this.state.players[client.sessionId];
       const monster = this.state.monsters[msg.monsterId];
       if (!player || !monster) return;
