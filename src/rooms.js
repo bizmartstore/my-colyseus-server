@@ -1,11 +1,11 @@
 // ============================================================
 // src/rooms.js — MMORPG Room Definition (Render + Colyseus)
 // ============================================================
+
 const { Room } = require("colyseus");
 
-// ============================================================
-// 🔗 Load Monsters from Google Sheet
-// ============================================================
+const fetch = (...args) => import("node-fetch").then(({ default: fetch }) => fetch(...args));
+
 const SHEET_ENDPOINT =
   "https://script.google.com/macros/s/AKfycbx5iXEVK7xzNwS465caDOF0ZaMdh6gi7h3xcvxySPjkeZ41LsFA0sIXKyBk3v0-ROfuzg/exec?action=getMonsters";
 

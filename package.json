@@ -6,16 +6,21 @@
   "scripts": {
     "start": "node src/index.js"
   },
-  "keywords": ["colyseus", "mmorpg", "game", "realtime"],
+  "keywords": [
+    "colyseus",
+    "mmorpg",
+    "game",
+    "realtime"
+  ],
   "author": "YourName",
   "license": "ISC",
   "dependencies": {
-    "colyseus": "^0.16.5",
     "@colyseus/ws-transport": "^0.16.5",
-    "express": "^5.1.0"
+    "colyseus": "^0.16.5",
+    "express": "^5.1.0",
+    "node-fetch": "^2.7.0"
   },
   "engines": {
     "node": ">=22"
   }
 }
-
