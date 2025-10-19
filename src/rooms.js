@@ -180,70 +180,101 @@ class MMORPGRoom extends Room {
     });
 
     /* ============================================================
-   ⚔️ Player Attack (vs Monsters) — Skill-Compatible
+   ⚔️ Player Attack (vs Monsters) — Debug Mode
    ============================================================ */
 this.onMessage("attack_monster", async (client, msg) => {
-  const player = this.state.players?.[client.sessionId];
-  const monster = this.state.monsters?.[String(msg.monsterId)];
-  if (!player || !monster || monster.hp <= 0) return;
-
-  // --- Base physical damage ---
-  const baseDamage = Math.max(1, (player.attack || 1) - (monster.defense || 0));
-
-  // --- Skill modifier (e.g. Fireball x1.8) ---
-  const skillPower = Number(msg.skillPower) || 1.0;
-  const skillName = msg.skillName || null;
-
-  // --- Critical hit chance ---
-  const critChance = player.critChance ? player.critChance / 100 : 0.1;
-  const isCrit = Math.random() < critChance;
-  const critMult = isCrit ? (player.critDamage ? player.critDamage / 100 : 1.5) : 1;
-
-  // --- Final total damage ---
-  const totalDamage = Math.floor(baseDamage * skillPower * critMult);
-
-  // --- Apply damage ---
-  monster.hp = Math.max(0, monster.hp - totalDamage);
-  monster.state = monster.hp > 0 ? "aggro" : "dead";
-  monster.target = client.sessionId;
-  monster.lastAggroAt = Date.now();
-
-  // --- Broadcast to map ---
-  this.safeBroadcastToMap(player.mapId, "monster_hit", {
-    monsterId: monster.id,
-    hp: monster.hp,
-    damage: totalDamage,
-    crit: isCrit,
-    attacker: player.playerName,
-    skillName,
-  });
-
-  // --- Handle death ---
-  if (monster.hp <= 0) {
-    this.safeBroadcastToMap(player.mapId, "monster_dead", {
-      monsterId: monster.id,
-      coins: monster.coins,
-      exp: monster.exp,
-      killedBy: player.playerName,
-      skillName,
-    });
-
-    player.exp = (player.exp || 0) + monster.exp;
-    player.coins = (player.coins || 0) + monster.coins;
-
-    // optional: reward endpoint hook
-    try {
-      await fetch(`${REWARD_ENDPOINT}&player=${encodeURIComponent(player.playerName)}&monster=${monster.name}`);
-    } catch (err) {
-      console.warn("⚠️ rewardPlayerForKill() failed:", err.message);
+  const startTime = Date.now();
+  try {
+    if (DEBUG) {
+      console.log("🛰️ [DEBUG] attack_monster received from", client.sessionId);
+      console.log("📦 Payload:", JSON.stringify(msg, null, 2));
     }
 
-    // respawn after 5s
-    this.clock.setTimeout(() => this.respawnMonster(monster), 5000);
-    monster.target = null;
-    monster.state = "dead";
+    const player = this.state.players?.[client.sessionId];
+    if (!player) {
+      console.warn("⚠️ [DEBUG] Player not found for", client.sessionId);
+      return;
+    }
+
+    const monsterId = String(msg?.monsterId || "").trim();
+    const monster = this.state.monsters?.[monsterId];
+    if (!monster) {
+      console.warn(`⚠️ [DEBUG] Monster not found: ${monsterId}`);
+      return;
+    }
+
+    if (player.mapId !== monster.mapId) {
+      console.warn(`⚠️ [DEBUG] Cross-map attack: Player map ${player.mapId}, Monster map ${monster.mapId}`);
+      return;
+    }
+
+    if (monster.hp <= 0) {
+      console.warn(`⚰️ [DEBUG] Monster ${monsterId} already dead`);
+      return;
+    }
+
+    // --- Damage calculations ---
+    const baseDamage = Math.max(1, (player.attack || 1) - (monster.defense || 0));
+    const skillPower = Number(msg.skillPower) || 1.0;
+    const critChance = player.critChance ? player.critChance / 100 : 0.1;
+    const isCrit = Math.random() < critChance;
+    const critMult = isCrit ? (player.critDamage ? player.critDamage / 100 : 1.5) : 1;
+    const totalDamage = Math.floor(baseDamage * skillPower * critMult);
+
+    monster.hp = Math.max(0, monster.hp - totalDamage);
+    monster.state = monster.hp > 0 ? "aggro" : "dead";
+    monster.target = client.sessionId;
+    monster.lastAggroAt = Date.now();
+
+    if (DEBUG) {
+      console.log(`🩸 [DEBUG] ${player.playerName} dealt ${totalDamage} dmg (${isCrit ? "CRIT" : "normal"})`);
+      console.log(`🐉 [DEBUG] ${monster.name} HP: ${monster.hp}/${monster.maxHP}`);
+    }
+
+    // Broadcast
+    this.safeBroadcastToMap(player.mapId, "monster_hit", {
+      monsterId: monster.id,
+      hp: monster.hp,
+      damage: totalDamage,
+      crit: isCrit,
+      attacker: player.playerName,
+    });
+
+    // Handle death
+    if (monster.hp <= 0) {
+      console.log(`💀 [DEBUG] ${player.playerName} killed ${monster.name}`);
+
+      this.safeBroadcastToMap(player.mapId, "monster_dead", {
+        monsterId: monster.id,
+        coins: monster.coins,
+        exp: monster.exp,
+        killedBy: player.playerName,
+      });
+
+      player.exp = (player.exp || 0) + monster.exp;
+      player.coins = (player.coins || 0) + monster.coins;
+
+      try {
+        if (DEBUG) console.log(`💰 [DEBUG] Sending reward request for ${player.playerName}`);
+        await fetch(`${REWARD_ENDPOINT}&player=${encodeURIComponent(player.playerName)}&monster=${encodeURIComponent(monster.name)}`);
+      } catch (err) {
+        console.warn("⚠️ [DEBUG] rewardPlayerForKill() failed:", err.message);
+      }
+
+      this.clock.setTimeout(() => this.respawnMonster(monster), 5000);
+      monster.target = null;
+      monster.state = "dead";
+    }
+
+  } catch (err) {
+    console.error("💥 [DEBUG] attack_monster crashed:", err);
+  } finally {
+    if (DEBUG) {
+      console.log(`⏱️ [DEBUG] attack_monster completed in ${Date.now() - startTime}ms`);
+    }
   }
 });
+
 
     /* ============================================================
        ⚔️ Player Attack (vs Players)
