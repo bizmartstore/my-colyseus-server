@@ -1,18 +1,21 @@
 {
   "name": "my-colyseus-server",
   "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "description": "MMORPG Colyseus server with Google Sheets monster integration",
+  "main": "src/index.js",
   "scripts": {
-  "start": "node src/index.js"
-},
-
-  "keywords": [],
-  "author": "",
+    "start": "node src/index.js"
+  },
+  "keywords": ["colyseus", "mmorpg", "game", "realtime"],
+  "author": "YourName",
   "license": "ISC",
   "dependencies": {
-    "@colyseus/ws-transport": "^0.16.5",
     "colyseus": "^0.16.5",
+    "@colyseus/ws-transport": "^0.16.5",
     "express": "^5.1.0"
+  },
+  "engines": {
+    "node": ">=22"
   }
 }
+

@@ -1,8 +1,7 @@
 // ============================================================
-// src/rooms.js — MMORPG Room Definition
+// src/rooms.js — MMORPG Room Definition (Render + Colyseus)
 // ============================================================
 const { Room } = require("colyseus");
-const fetch = require("node-fetch");
 
 // ============================================================
 // 🔗 Load Monsters from Google Sheet
@@ -22,6 +21,7 @@ async function loadMonstersFromSheet() {
       class: m.Class,
       level: Number(m.Level) || 1,
       maxHP: Number(m.BaseHP) || 100,
+      hp: Number(m.CurrentHP) || Number(m.BaseHP) || 100,
       attack: Number(m.Attack) || 10,
       defense: Number(m.Defense) || 5,
       speed: Number(m.Speed) || 5,
@@ -30,9 +30,8 @@ async function loadMonstersFromSheet() {
       mapId: Number(m.MapID) || 101,
       x: Number(m.PositionX) || 500,
       y: Number(m.PositionY) || 260,
-      hp: Number(m.CurrentHP) || Number(m.BaseHP) || 100,
       coins: Math.floor((Number(m.Attack) + Number(m.Level)) / 2) || 10,
-      exp: Math.floor((Number(m.Level) * 5) + 10),
+      exp: Math.floor(Number(m.Level) * 5 + 10),
       sprites: {
         idleLeft: m.ImageURL_IdleLeft,
         idleRight: m.ImageURL_IdleRight,
@@ -43,6 +42,8 @@ async function loadMonstersFromSheet() {
         dieLeft: m.ImageURL_Die_Left,
         dieRight: m.ImageURL_Die_Right,
       },
+      state: "idle",
+      dir: "left",
     }));
   } catch (err) {
     console.error("❌ Failed to fetch monsters:", err);
@@ -50,98 +51,33 @@ async function loadMonstersFromSheet() {
   }
 }
 
-/* ============================================================
- 🧩 Character Database (Player Templates)
- ============================================================ */
+// ============================================================
+// 🧩 Character Database (Player Templates)
+// ============================================================
 const characterDatabase = {
-  C001: {
-    Name: "Myca",
-    Class: "Valkyrie",
-    BaseHP: 85,
-    BaseMana: 90,
-    Attack: 30,
-    Defense: 13,
-    Speed: 10,
-    CritDamage: 140,
-    ImageURL_IdleFront: "https://i.ibb.co/rGMF3kCd/Valkyrie-Front.gif",
-    ImageURL_IdleBack: "https://i.ibb.co/kg0WkTrt/Valkyrie-Back.gif",
-    ImageURL_Walk_Left: "https://i.ibb.co/jkGCZG33/Valkyrie-RUNLEFT.gif",
-    ImageURL_Walk_Right: "https://i.ibb.co/XxtZZ46d/Valkyrie-RUNRIGHT.gif",
-    ImageURL_Attack_Left: "https://i.ibb.co/QSX6Q6V/Valkyrie-Attack-Left.gif",
-    ImageURL_Attack_Right: "https://i.ibb.co/xtLLKJxJ/Valkyrie-Attack-Right.gif",
-  },
-  C002: {
-    Name: "Luna",
-    Class: "Dark Oracle",
-    BaseHP: 60,
-    BaseMana: 100,
-    Attack: 40,
-    Defense: 5,
-    Speed: 8,
-    CritDamage: 100,
-    ImageURL_IdleFront: "https://i.ibb.co/0p8hBvDX/ezgif-com-animated-gif-maker.gif",
-    ImageURL_IdleBack: "https://i.ibb.co/n87HYqwW/ezgif-com-rotate-2.gif",
-    ImageURL_Walk_Left: "https://i.ibb.co/LXz5t6pN/ezgif-com-rotate.gif",
-    ImageURL_Walk_Right: "https://i.ibb.co/SDpYsNsN/Running-front.gif",
-    ImageURL_Attack_Left: "https://i.ibb.co/WWKvhRKP/ezgif-com-rotate.gif",
-    ImageURL_Attack_Right: "https://i.ibb.co/GvbYv6qv/Swing-front.gif",
-  },
-  C003: {
-    Name: "Mike",
-    Class: "Mino Warrior",
-    BaseHP: 80,
-    BaseMana: 80,
-    Attack: 25,
-    Defense: 20,
-    Speed: 8,
-    CritDamage: 100,
-    ImageURL_IdleFront: "https://i.ibb.co/s9rWsbfs/Mino-Idle-Right.gif",
-    ImageURL_IdleBack: "https://i.ibb.co/PvgKK96J/Mino-Idle-Left.gif",
-    ImageURL_Walk_Left: "https://i.ibb.co/n8jBKBB1/Mino-Run-Left.gif",
-    ImageURL_Walk_Right: "https://i.ibb.co/Jj5dH23t/Mino-Run-Right.gif",
-    ImageURL_Attack_Left: "https://i.ibb.co/kVZxqB8G/Mino-Slash-Left.gif",
-    ImageURL_Attack_Right: "https://i.ibb.co/sdVH803V/Mino-Slash-Right.gif",
-  },
-  C004: {
-    Name: "Mizo",
-    Class: "Necromancer",
-    BaseHP: 60,
-    BaseMana: 100,
-    Attack: 35,
-    Defense: 15,
-    Speed: 8,
-    CritDamage: 100,
-    ImageURL_IdleFront: "https://i.ibb.co/ynHNt0LQ/IDLE-RIGHT.gif",
-    ImageURL_IdleBack: "https://i.ibb.co/qYjYdMG6/IDLE-LEFT.gif",
-    ImageURL_Walk_Left: "https://i.ibb.co/YBMvpGzG/RUN-LEFT.gif",
-    ImageURL_Walk_Right: "https://i.ibb.co/D3DYmMv/RUN-RIGHT.gif",
-    ImageURL_Attack_Left: "https://i.ibb.co/DPDXwnWM/ATTACK-LEFT.gif",
-    ImageURL_Attack_Right: "https://i.ibb.co/mrMCxpJM/ATTACK-RIGHT.gif",
-  },
+  C001: { /* ... keep your character definitions unchanged ... */ },
+  C002: { /* ... */ },
+  C003: { /* ... */ },
+  C004: { /* ... */ },
 };
 
-/* ============================================================
- 🏰 MMORPG Room Definition
- ============================================================ */
+// ============================================================
+// 🏰 MMORPG Room Definition
+// ============================================================
 class MMORPGRoom extends Room {
-  async onCreate(options) {
+  async onCreate() {
     console.log("🌍 MMORPGRoom created!");
     this.setSeatReservationTime(20);
     this.setState({ players: {}, monsters: {} });
 
-    // Load monsters dynamically
+    // ✅ Load monsters dynamically
     this.monsterTemplates = await loadMonstersFromSheet();
     console.log(`📜 Loaded ${this.monsterTemplates.length} monster templates`);
 
-    // Spawn monsters for each map
     this.spawnMonsters();
-
-    // Random movement updates
     this.clock.setInterval(() => this.updateMonsterMovement(), 2000);
 
-    /* ============================================================
-       Player Movement
-       ============================================================ */
+    // Player Movement
     this.onMessage("move", (client, msg) => {
       const p = this.state.players[client.sessionId];
       if (!p) return;
@@ -151,118 +87,66 @@ class MMORPGRoom extends Room {
       this.broadcastToMap(p.mapId, "player_move", { id: client.sessionId, ...p });
     });
 
-    /* ============================================================
-       Player Attack → Damage Monsters
-       ============================================================ */
+    // Player Attack
     this.onMessage("attack_monster", (client, msg) => {
-      const player = this.state.players[client.sessionId];
-      const monster = this.state.monsters[msg.monsterId];
-      if (!player || !monster) return;
+      try {
+        const player = this.state.players?.[client.sessionId];
+        if (!player) return;
 
-      const damage = Math.max(1, player.attack - monster.defense);
-      monster.hp -= damage;
+        const monster = this.state.monsters?.[msg.monsterId];
+        if (!monster) return;
+        if (monster.hp <= 0) return;
 
-      this.broadcastToMap(player.mapId, "monster_hit", {
-        monsterId: monster.id,
-        hp: monster.hp,
-        damage,
-        attacker: player.playerName,
-      });
+        const baseDamage = Math.max(1, player.attack - monster.defense);
+        const crit = Math.random() < 0.1;
+        const totalDamage = Math.floor(baseDamage * (crit ? 1.5 : 1.0));
+        monster.hp = Math.max(0, monster.hp - totalDamage);
 
-      console.log(`⚔️ ${player.playerName} hit ${monster.name} for ${damage} damage`);
-
-      if (monster.hp <= 0) {
-        this.handleMonsterDeath(player, monster);
-      } else {
-        this.scheduleMonsterCounterAttack(player, monster);
-      }
-    });
-
-    /* ============================================================
-       Player Skill Attack → Damage Monsters
-       ============================================================ */
-    this.onMessage("skill_attack", (client, msg) => {
-      const player = this.state.players[client.sessionId];
-      const monster = this.state.monsters[msg.monsterId];
-      if (!player || !monster) return;
-
-      const baseDamage = Number(player.attack) || 10;
-      const skillBonus = Number(msg.damage || 0);
-      const totalDamage = Math.max(1, Math.floor(baseDamage + skillBonus - monster.defense));
-
-      monster.hp -= totalDamage;
-
-      this.broadcastToMap(player.mapId, "monster_hit", {
-        monsterId: monster.id,
-        hp: monster.hp,
-        damage: totalDamage,
-        attacker: player.playerName,
-        skillName: msg.skillName || "Skill Attack",
-      });
-
-      console.log(`🔥 ${player.playerName} used ${msg.skillName || "Skill"} on ${monster.name}, -${totalDamage} HP`);
-
-      if (monster.hp <= 0) {
-        this.handleMonsterDeath(player, monster);
-      } else {
-        this.scheduleMonsterCounterAttack(player, monster);
-      }
-    });
-  }
-
-  /* ============================================================
-     💀 Handle Monster Death
-     ============================================================ */
-  handleMonsterDeath(player, monster) {
-    this.broadcastToMap(player.mapId, "monster_dead", {
-      monsterId: monster.id,
-      coins: monster.coins,
-      exp: monster.exp,
-    });
-
-    // Reward player
-    player.exp = (player.exp || 0) + monster.exp;
-    player.coins = (player.coins || 0) + monster.coins;
-
-    console.log(`💰 ${player.playerName} gained ${monster.coins} coins and ${monster.exp} EXP`);
-
-    // Respawn monster
-    this.clock.setTimeout(() => this.respawnMonster(monster), 5000);
-  }
-
-  /* ============================================================
-     🧠 Monster Counterattack Logic
-     ============================================================ */
-  scheduleMonsterCounterAttack(player, monster) {
-    this.clock.setTimeout(() => {
-      if (!player || !monster) return;
-      if (monster.hp <= 0) return;
-
-      const dmg = Math.max(1, Math.floor(monster.attack - player.defense / 2));
-      player.hp -= dmg;
-      if (player.hp < 0) player.hp = 0;
-
-      this.broadcastToMap(player.mapId, "player_hit", {
-        playerId: player.id,
-        hp: player.hp,
-        damage: dmg,
-        attacker: monster.name,
-      });
-
-      console.log(`🩸 ${monster.name} counter-attacked ${player.playerName} for ${dmg} damage`);
-
-      if (player.hp <= 0) {
-        this.broadcastToMap(player.mapId, "player_dead", {
-          playerId: player.id,
-          name: player.playerName,
+        this.broadcastToMap(player.mapId, "monster_hit", {
+          monsterId: monster.id,
+          hp: monster.hp,
+          damage: totalDamage,
+          crit,
+          attacker: player.playerName,
         });
+
+        if (monster.hp > 0) {
+          if (Math.random() < 0.4) {
+            const counterDamage = Math.max(1, monster.attack - player.defense);
+            player.hp = Math.max(0, player.hp - counterDamage);
+
+            this.broadcastToMap(player.mapId, "player_hit", {
+              playerId: client.sessionId,
+              damage: counterDamage,
+              hp: player.hp,
+              monsterId: monster.id,
+            });
+
+            if (player.hp <= 0) {
+              this.broadcastToMap(player.mapId, "player_dead", {
+                playerId: client.sessionId,
+                by: monster.name,
+              });
+            }
+          }
+        } else {
+          this.broadcastToMap(player.mapId, "monster_dead", {
+            monsterId: monster.id,
+            coins: monster.coins,
+            exp: monster.exp,
+          });
+
+          player.exp = (player.exp || 0) + monster.exp;
+          player.coins = (player.coins || 0) + monster.coins;
+
+          this.clock.setTimeout(() => this.respawnMonster(monster), 5000);
+        }
+      } catch (err) {
+        console.error("❌ attack_monster failed:", err);
       }
-    }, 1000); // attack after 1s
+    });
   }
 
-  /* ============================================================
-     🧍 Player Joins
-     ============================================================ */
   async onJoin(client, options) {
     const safeName = options.playerName || "Guest";
     const safeChar = characterDatabase[options.CharacterID] || characterDatabase["C001"];
@@ -295,19 +179,16 @@ class MMORPGRoom extends Room {
     console.log(`👋 Player left: ${p.playerName}`);
   }
 
-  /* ============================================================
-     🧩 Monster Logic
-     ============================================================ */
   spawnMonsters() {
     this.monsterTemplates.forEach((t) => {
-      const monster = { ...t, dir: "left", state: "idle" };
-      this.state.monsters[monster.id] = monster;
+      this.state.monsters[t.id] = { ...t };
     });
     console.log(`🧟 Spawned ${Object.keys(this.state.monsters).length} monsters`);
   }
 
   updateMonsterMovement() {
     for (const m of Object.values(this.state.monsters)) {
+      if (m.hp <= 0) continue;
       if (Math.random() < 0.5) {
         m.dir = Math.random() < 0.5 ? "left" : "right";
         m.state = "walk";
@@ -321,8 +202,8 @@ class MMORPGRoom extends Room {
 
   respawnMonster(monster) {
     monster.hp = monster.maxHP;
-    monster.x += (Math.random() * 100 - 50);
-    monster.y += (Math.random() * 60 - 30);
+    monster.x += Math.random() * 100 - 50;
+    monster.y += Math.random() * 60 - 30;
     monster.state = "idle";
     this.broadcastToMap(monster.mapId, "monster_respawn", monster);
   }
