@@ -2,9 +2,56 @@
 // src/rooms.js — MMORPG Room Definition
 // ============================================================
 const { Room } = require("colyseus");
+const fetch = require("node-fetch");
+
+// ============================================================
+// 🔗 Load Monsters from Google Sheet
+// ============================================================
+const SHEET_ENDPOINT =
+  "https://script.google.com/macros/s/AKfycbx5iXEVK7xzNwS465caDOF0ZaMdh6gi7h3xcvxySPjkeZ41LsFA0sIXKyBk3v0-ROfuzg/exec?action=getMonsters";
+
+async function loadMonstersFromSheet() {
+  try {
+    const res = await fetch(SHEET_ENDPOINT);
+    const data = await res.json();
+    if (!Array.isArray(data) || data.length === 0) return [];
+
+    return data.map((m) => ({
+      id: m.MonsterID,
+      name: m.Name,
+      class: m.Class,
+      level: Number(m.Level) || 1,
+      maxHP: Number(m.BaseHP) || 100,
+      attack: Number(m.Attack) || 10,
+      defense: Number(m.Defense) || 5,
+      speed: Number(m.Speed) || 5,
+      critDamage: Number(m.CritDamage) || 100,
+      critChance: Number(m.CritChance) || 10,
+      mapId: Number(m.MapID) || 101,
+      x: Number(m.PositionX) || 500,
+      y: Number(m.PositionY) || 260,
+      hp: Number(m.CurrentHP) || Number(m.BaseHP) || 100,
+      coins: Math.floor((Number(m.Attack) + Number(m.Level)) / 2) || 10,
+      exp: Math.floor((Number(m.Level) * 5) + 10),
+      sprites: {
+        idleLeft: m.ImageURL_IdleLeft,
+        idleRight: m.ImageURL_IdleRight,
+        walkLeft: m.ImageURL_Walk_Left,
+        walkRight: m.ImageURL_Walk_Right,
+        attackLeft: m.ImageURL_Attack_Left,
+        attackRight: m.ImageURL_Attack_Right,
+        dieLeft: m.ImageURL_Die_Left,
+        dieRight: m.ImageURL_Die_Right,
+      },
+    }));
+  } catch (err) {
+    console.error("❌ Failed to fetch monsters:", err);
+    return [];
+  }
+}
 
 /* ============================================================
- 🧩 Character Database (Static Sample)
+ 🧩 Character Database (Player Templates)
  ============================================================ */
 const characterDatabase = {
   C001: {
@@ -74,234 +121,145 @@ const characterDatabase = {
 };
 
 /* ============================================================
- 🏰 MMORPG Room — Shared World (Map-based Visibility)
+ 🏰 MMORPG Room Definition
  ============================================================ */
 class MMORPGRoom extends Room {
-  onCreate(options) {
+  async onCreate(options) {
     console.log("🌍 MMORPGRoom created!");
-
-    // ✅ Fix: Extend reservation time to prevent join timeout
     this.setSeatReservationTime(20);
+    this.setState({ players: {}, monsters: {} });
 
-    // ✅ Initialize room state
-    this.setState({ players: {} });
+    // Load monsters dynamically
+    this.monsterTemplates = await loadMonstersFromSheet();
+    console.log(`📜 Loaded ${this.monsterTemplates.length} monster templates`);
 
-    // Maintain a tick clock (keeps room active)
-    this.clock.setInterval(() => {}, 1000 / 20);
+    // Spawn monsters for each map
+    this.spawnMonsters();
+
+    // Random movement updates
+    this.clock.setInterval(() => this.updateMonsterMovement(), 2000);
 
     /* ============================================================
-       🧭 Movement Handler
+       Player Movement
        ============================================================ */
-    this.onMessage("move", (client, message) => {
-      const player = this.state.players[client.sessionId];
-      if (!player) return;
-      player.x = message.x;
-      player.y = message.y;
-      player.dir = message.dir;
-
-      const payload = {
-        id: client.sessionId,
-        x: player.x,
-        y: player.y,
-        dir: player.dir,
-        mapId: player.mapId,
-        playerName: player.playerName,
-      };
-
-      // Broadcast to players in same map
-      this.clients.forEach((c) => {
-        const other = this.state.players[c.sessionId];
-        if (other?.mapId === player.mapId) c.send("player_move", payload);
-      });
+    this.onMessage("move", (client, msg) => {
+      const p = this.state.players[client.sessionId];
+      if (!p) return;
+      p.x = msg.x;
+      p.y = msg.y;
+      p.dir = msg.dir;
+      this.broadcastToMap(p.mapId, "player_move", { id: client.sessionId, ...p });
     });
 
     /* ============================================================
-       ⚔️ Attack Handler
+       Player Attack → Damage Monsters
        ============================================================ */
-    this.onMessage("attack", (client, message) => {
+    this.onMessage("attack_monster", (client, msg) => {
       const player = this.state.players[client.sessionId];
-      if (!player) return;
-      const payload = {
-        sessionId: client.sessionId,
-        mapId: player.mapId,
-        ...message,
-      };
-      this.clients.forEach((c) => {
-        const other = this.state.players[c.sessionId];
-        if (other?.mapId === player.mapId) c.send("attack", payload);
-      });
-    });
+      const monster = this.state.monsters[msg.monsterId];
+      if (!player || !monster) return;
 
-    /* ============================================================
-       📨 Snapshot Request Handler
-       ============================================================ */
-    this.onMessage("request_players", (client) => {
-      const requester = this.state.players[client.sessionId];
-      if (!requester) return;
-      const sameMapPlayers = {};
-      for (const [id, p] of Object.entries(this.state.players)) {
-        if (p.mapId === requester.mapId) sameMapPlayers[id] = p;
+      const damage = Math.max(1, player.attack - monster.defense);
+      monster.hp -= damage;
+
+      this.broadcastToMap(player.mapId, "monster_hit", {
+        monsterId: monster.id,
+        hp: monster.hp,
+        damage,
+        attacker: player.playerName,
+      });
+
+      if (monster.hp <= 0) {
+        this.broadcastToMap(player.mapId, "monster_dead", {
+          monsterId: monster.id,
+          coins: monster.coins,
+          exp: monster.exp,
+        });
+
+        // Reward player
+        player.exp = (player.exp || 0) + monster.exp;
+        player.coins = (player.coins || 0) + monster.coins;
+
+        // Respawn monster
+        this.clock.setTimeout(() => this.respawnMonster(monster), 5000);
       }
-      client.send("players_snapshot", sameMapPlayers);
-    });
-
-    /* ============================================================
-       💬 Chat Handler
-       ============================================================ */
-    this.onMessage("chat", (client, message) => {
-      const player = this.state.players[client.sessionId];
-      if (!player || !message.text) return;
-
-      const chatPayload = {
-        sender: player.email,
-        name: player.playerName,
-        text: String(message.text).substring(0, 300),
-        mapId: player.mapId,
-        ts: Date.now(),
-      };
-
-      console.log(`💬 [CHAT] ${player.playerName}@Map${player.mapId}: ${chatPayload.text}`);
-
-      this.clients.forEach((c) => {
-        const other = this.state.players[c.sessionId];
-        if (other?.mapId === player.mapId) c.send("chat", chatPayload);
-      });
-    });
-
-    /* ============================================================
-       🗺️ Map Change Handler
-       ============================================================ */
-    this.onMessage("change_map", (client, message) => {
-      const player = this.state.players[client.sessionId];
-      if (!player) return;
-
-      const oldMap = player.mapId;
-      const newMap = Number(message.newMapId) || oldMap;
-      if (newMap === oldMap) return;
-
-      console.log(`🌍 ${player.playerName} moved from Map ${oldMap} → ${newMap}`);
-
-      player.mapId = newMap;
-
-      // Notify old map players
-      this.clients.forEach((c) => {
-        const other = this.state.players[c.sessionId];
-        if (other?.mapId === oldMap) c.send("player_left", { id: client.sessionId });
-      });
-
-      // Notify new map players
-      this.clients.forEach((c) => {
-        const other = this.state.players[c.sessionId];
-        if (other?.mapId === newMap && c.sessionId !== client.sessionId) {
-          c.send("player_joined", {
-            id: client.sessionId,
-            player: this.state.players[client.sessionId],
-          });
-        }
-      });
-
-      // Send snapshot to switching player
-      const sameMapPlayers = {};
-      for (const [id, p] of Object.entries(this.state.players)) {
-        if (p.mapId === newMap) sameMapPlayers[id] = p;
-      }
-      client.send("players_snapshot", sameMapPlayers);
     });
   }
 
   /* ============================================================
-     🧍 Player Joins (fast non-blocking join)
+     🧍 Player Joins
      ============================================================ */
   async onJoin(client, options) {
-    console.log("✨ Player joined:", client.sessionId, options);
+    const safeName = options.playerName || "Guest";
+    const safeChar = characterDatabase[options.CharacterID] || characterDatabase["C001"];
+    const mapId = Number(options.mapId) || 101;
 
-    // ✅ Early acknowledgment — prevents seat expiry
+    this.state.players[client.sessionId] = {
+      id: client.sessionId,
+      playerName: safeName,
+      mapId,
+      x: 200,
+      y: 200,
+      attack: safeChar.Attack,
+      defense: safeChar.Defense,
+      hp: safeChar.BaseHP,
+      mp: safeChar.BaseMana,
+      exp: 0,
+      coins: 0,
+      sprites: safeChar,
+    };
+
     client.send("join_ack", { ok: true });
-
-    // 🕒 Setup player data asynchronously
-    setTimeout(() => {
-      try {
-        const safeEmail = options.email || `guest_${Math.random().toString(36).substring(2, 8)}@game.local`;
-        const safeName = options.playerName || "Guest";
-        const safeCharacterID = options.CharacterID || "C001";
-        const charData = characterDatabase[safeCharacterID] || characterDatabase["C001"];
-        const mapId = Number(options.mapId) || 1;
-        const posX = Number(options.x) || 200;
-        const posY = Number(options.y) || 200;
-
-        this.state.players[client.sessionId] = {
-          id: client.sessionId,
-          email: safeEmail,
-          playerName: safeName,
-          CharacterID: safeCharacterID,
-          characterClass: charData.Class,
-          mapId,
-          x: posX,
-          y: posY,
-          dir: options.dir || "down",
-          hp: charData.BaseHP,
-          mp: charData.BaseMana,
-          attack: charData.Attack,
-          defense: charData.Defense,
-          speed: charData.Speed,
-          critDamage: charData.CritDamage,
-          sprites: {
-            idleFront: charData.ImageURL_IdleFront,
-            idleBack: charData.ImageURL_IdleBack,
-            walkLeft: charData.ImageURL_Walk_Left,
-            walkRight: charData.ImageURL_Walk_Right,
-            attackLeft: charData.ImageURL_Attack_Left,
-            attackRight: charData.ImageURL_Attack_Right,
-          },
-        };
-
-        console.log(`✅ ${safeName} (${safeEmail}) joined Map ${mapId} as ${charData.Class}`);
-
-        // Send same-map snapshot
-        const sameMapPlayers = {};
-        for (const [id, other] of Object.entries(this.state.players)) {
-          if (other.mapId === mapId) sameMapPlayers[id] = other;
-        }
-        client.send("players_snapshot", sameMapPlayers);
-
-        // Notify others
-        this.clients.forEach((c) => {
-          const other = this.state.players[c.sessionId];
-          if (c.sessionId !== client.sessionId && other?.mapId === mapId) {
-            c.send("player_joined", {
-              id: client.sessionId,
-              player: this.state.players[client.sessionId],
-            });
-          }
-        });
-      } catch (err) {
-        console.error("❌ Error in delayed join:", err);
-      }
-    }, 100);
+    client.send("monsters_snapshot", this.state.monsters);
+    console.log(`✅ ${safeName} joined map ${mapId}`);
   }
 
-  /* ============================================================
-     👋 Player Leaves
-     ============================================================ */
   onLeave(client) {
-    const player = this.state.players[client.sessionId];
-    if (!player) return;
-
-    console.log(`👋 Player left: ${client.sessionId} (${player.playerName}) from Map ${player.mapId}`);
-
-    this.clients.forEach((c) => {
-      const other = this.state.players[c.sessionId];
-      if (other?.mapId === player.mapId) {
-        c.send("player_left", { id: client.sessionId });
-      }
-    });
-
+    const p = this.state.players[client.sessionId];
+    if (!p) return;
     delete this.state.players[client.sessionId];
+    console.log(`👋 Player left: ${p.playerName}`);
   }
 
   /* ============================================================
-     🧹 Room Disposed
+     🧩 Monster Logic
      ============================================================ */
+  spawnMonsters() {
+    this.monsterTemplates.forEach((t) => {
+      const monster = { ...t, dir: "left", state: "idle" };
+      this.state.monsters[monster.id] = monster;
+    });
+    console.log(`🧟 Spawned ${Object.keys(this.state.monsters).length} monsters`);
+  }
+
+  updateMonsterMovement() {
+    for (const m of Object.values(this.state.monsters)) {
+      if (Math.random() < 0.5) {
+        m.dir = Math.random() < 0.5 ? "left" : "right";
+        m.state = "walk";
+        m.x += m.dir === "left" ? -30 : 30;
+      } else {
+        m.state = "idle";
+      }
+    }
+    this.broadcast("monsters_update", this.state.monsters);
+  }
+
+  respawnMonster(monster) {
+    monster.hp = monster.maxHP;
+    monster.x += (Math.random() * 100 - 50);
+    monster.y += (Math.random() * 60 - 30);
+    monster.state = "idle";
+    this.broadcastToMap(monster.mapId, "monster_respawn", monster);
+  }
+
+  broadcastToMap(mapId, event, data) {
+    this.clients.forEach((c) => {
+      const p = this.state.players[c.sessionId];
+      if (p?.mapId === mapId) c.send(event, data);
+    });
+  }
+
   onDispose() {
     console.log("🧹 MMORPGRoom disposed.");
   }
