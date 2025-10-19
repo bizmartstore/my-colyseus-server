@@ -1,5 +1,5 @@
 // ============================================================
-// src/index.js — Colyseus MMORPG Server Entry
+// src/index.js — Colyseus MMORPG Server Entry (Multi-map Ready)
 // ============================================================
 
 const http = require("http");
@@ -11,49 +11,60 @@ const { MMORPGRoom } = require("./rooms");
 const app = express();
 
 /* ============================================================
-   ✅ Health Check Endpoint
+   ✅ Health Check & Debug Endpoints
    ============================================================ */
 app.get("/", (req, res) => {
-  res.send("🟢 Colyseus MMORPG server is running successfully on Render!");
+  res.send(`
+    <h2>🟢 Colyseus MMORPG Server is Running</h2>
+    <p>Health OK ✅</p>
+    <p>WebSocket endpoint: <code>wss://${req.headers.host}</code></p>
+    <p>Room: <strong>mmorpg_room</strong></p>
+  `);
+});
+
+// Optional: quick endpoint to check number of connected clients
+app.get("/status", (req, res) => {
+  const rooms = gameServer?.matchMaker?.rooms || {};
+  const roomData = Object.entries(rooms).map(([id, room]) => ({
+    id,
+    name: room.roomName,
+    clients: room.clients?.length || 0,
+  }));
+  res.json({ ok: true, rooms: roomData });
 });
 
 /* ============================================================
-   ⚙️ Create HTTP + WS Server
+   ⚙️ HTTP + WS Server Initialization
    ============================================================ */
 const server = http.createServer(app);
 
-/* ============================================================
-   🚀 Initialize Colyseus Game Server
-   ============================================================ */
 const gameServer = new Server({
   transport: new WebSocketTransport({
-    server, // same HTTP server (Render-compatible)
-    pingInterval: 4000,
-    pingMaxRetries: 5,
+    server,
+    pingInterval: 4000, // keeps idle sockets alive
+    pingMaxRetries: 5,  // after 5 missed pings, disconnect
   }),
-  seatReservationTime: 60, // global safety window for joining
+  seatReservationTime: 60, // seconds to allow reconnect
 });
 
 /* ============================================================
-   🌍 Define MMORPG Room (shared world, filtered by mapId)
+   🌍 Define MMORPG Room
    ============================================================ */
 gameServer.define("mmorpg_room", MMORPGRoom);
-
-console.log("🌍 Room 'mmorpg_room' defined (shared room, visibility by mapId).");
+console.log("🌍 Room 'mmorpg_room' defined — multi-map visibility handled inside MMORPGRoom.");
 
 /* ============================================================
    🎮 Start Listening (Render-compatible)
    ============================================================ */
 const PORT = process.env.PORT || 2567;
 
-// ✅ Use server.listen for Render’s web service
 server.listen(PORT, () => {
   console.log(`✅ Server running on port ${PORT}`);
   console.log(`🌐 Health check: https://mmorpg-colyseus-server-0u0g.onrender.com/`);
-  console.log(`🔗 WebSocket endpoint: wss://mmorpg-colyseus-server-0u0g.onrender.com`);
+  console.log(`🔗 WebSocket: wss://mmorpg-colyseus-server-0u0g.onrender.com`);
   console.log("-----------------------------------------------------------");
-  console.log("💡 Each player joins a shared room.");
-  console.log("   Map-based visibility handled inside MMORPGRoom.");
+  console.log("💡 All players share one room.");
+  console.log("   Player visibility filtered by mapId in MMORPGRoom.");
   console.log("-----------------------------------------------------------");
 });
 
@@ -64,9 +75,19 @@ process.on("SIGINT", async () => {
   console.log("🧹 Server shutting down...");
   try {
     await gameServer.gracefullyShutdown();
-    console.log("✅ Shutdown complete.");
+    console.log("✅ Colyseus shutdown complete.");
   } catch (err) {
     console.error("❌ Error during shutdown:", err);
   }
-  process.exit();
+  process.exit(0);
+});
+
+/* ============================================================
+   🚨 Catch unexpected server errors
+   ============================================================ */
+process.on("uncaughtException", (err) => {
+  console.error("💥 Uncaught Exception:", err);
+});
+process.on("unhandledRejection", (reason, p) => {
+  console.error("💥 Unhandled Rejection:", reason, p);
 });

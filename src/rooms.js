@@ -1,5 +1,5 @@
 // ============================================================
-// src/rooms.js — MMORPG Room Definition (Render + Colyseus)
+// src/rooms.js — MMORPG Room Definition (Multi-map Ready)
 // ============================================================
 
 const { Room } = require("colyseus");
@@ -42,7 +42,6 @@ async function loadMonstersFromSheet() {
     return data.map((m) => ({
       id: m.MonsterID,
       name: m.Name,
-      class: m.Class,
       level: Number(m.Level) || 1,
       maxHP: Number(m.BaseHP) || 100,
       hp: Number(m.CurrentHP) || Number(m.BaseHP) || 100,
@@ -82,8 +81,6 @@ const characterDatabase = {
     Defense: 13,
     Speed: 10,
     CritDamage: 140,
-    ImageURL_IdleFront: "https://i.ibb.co/rGMF3kCd/Valkyrie-Front.gif",
-    ImageURL_IdleBack: "https://i.ibb.co/kg0WkTrt/Valkyrie-Back.gif",
     ImageURL_Walk_Left: "https://i.ibb.co/jkGCZG33/Valkyrie-RUNLEFT.gif",
     ImageURL_Walk_Right: "https://i.ibb.co/XxtZZ46d/Valkyrie-RUNRIGHT.gif",
     ImageURL_Attack_Left: "https://i.ibb.co/QSX6Q6V/Valkyrie-Attack-Left.gif",
@@ -98,8 +95,6 @@ const characterDatabase = {
     Defense: 5,
     Speed: 8,
     CritDamage: 100,
-    ImageURL_IdleFront: "https://i.ibb.co/0p8hBvDX/ezgif-com-animated-gif-maker.gif",
-    ImageURL_IdleBack: "https://i.ibb.co/n87HYqwW/ezgif-com-rotate-2.gif",
     ImageURL_Walk_Left: "https://i.ibb.co/LXz5t6pN/ezgif-com-rotate.gif",
     ImageURL_Walk_Right: "https://i.ibb.co/SDpYsNsN/Running-front.gif",
     ImageURL_Attack_Left: "https://i.ibb.co/WWKvhRKP/ezgif-com-rotate.gif",
@@ -114,8 +109,6 @@ const characterDatabase = {
     Defense: 20,
     Speed: 8,
     CritDamage: 100,
-    ImageURL_IdleFront: "https://i.ibb.co/s9rWsbfs/Mino-Idle-Right.gif",
-    ImageURL_IdleBack: "https://i.ibb.co/PvgKK96J/Mino-Idle-Left.gif",
     ImageURL_Walk_Left: "https://i.ibb.co/n8jBKBB1/Mino-Run-Left.gif",
     ImageURL_Walk_Right: "https://i.ibb.co/Jj5dH23t/Mino-Run-Right.gif",
     ImageURL_Attack_Left: "https://i.ibb.co/kVZxqB8G/Mino-Slash-Left.gif",
@@ -130,8 +123,6 @@ const characterDatabase = {
     Defense: 15,
     Speed: 8,
     CritDamage: 100,
-    ImageURL_IdleFront: "https://i.ibb.co/ynHNt0LQ/IDLE-RIGHT.gif",
-    ImageURL_IdleBack: "https://i.ibb.co/qYjYdMG6/IDLE-LEFT.gif",
     ImageURL_Walk_Left: "https://i.ibb.co/YBMvpGzG/RUN-LEFT.gif",
     ImageURL_Walk_Right: "https://i.ibb.co/D3DYmMv/RUN-RIGHT.gif",
     ImageURL_Attack_Left: "https://i.ibb.co/DPDXwnWM/ATTACK-LEFT.gif",
@@ -140,7 +131,7 @@ const characterDatabase = {
 };
 
 /* ============================================================
-   🏰 MMORPG Room Definition
+   🏰 MMORPG Room Definition (Multi-map Ready)
    ============================================================ */
 class MMORPGRoom extends Room {
   async onCreate() {
@@ -159,13 +150,12 @@ class MMORPGRoom extends Room {
     /* ============================================================
        🕐 Keep-alive Ping Handler (Prevents Disconnects)
        ============================================================ */
-    this.onMessage("ping", (client, data) => {
-      // Respond to ping with a small "pong" to keep socket open
+    this.onMessage("ping", (client) => {
       client.send("pong", { ok: true, t: Date.now() });
     });
 
     /* ============================================================
-       🚶 Player Movement
+       🚶 Player Movement (Map-specific)
        ============================================================ */
     this.onMessage("move", (client, msg) => {
       const p = this.state.players[client.sessionId];
@@ -173,111 +163,56 @@ class MMORPGRoom extends Room {
       p.x = msg.x;
       p.y = msg.y;
       p.dir = msg.dir;
-      this.safeBroadcastToMap(p.mapId, "player_move", { id: client.sessionId, x: p.x, y: p.y, dir: p.dir });
+      this.safeBroadcastToMap(p.mapId, "player_move", {
+        id: client.sessionId,
+        x: p.x,
+        y: p.y,
+        dir: p.dir,
+      });
     });
 
     /* ============================================================
-       ⚔️ Player Attack — Safe & Non-blocking
+       ⚔️ Player Attack — Map-safe & Non-blocking
        ============================================================ */
     this.onMessage("attack_monster", async (client, msg) => {
-      console.log("▶ attack_monster start", { sessionId: client.sessionId, msg });
-      try {
-        const player = this.state.players?.[client.sessionId];
-        const monster = this.state.monsters?.[msg.monsterId];
-        if (!player || !monster || monster.hp <= 0) {
-          console.log("◀ attack_monster end (no player/monster or monster dead)");
-          return;
-        }
+      const player = this.state.players?.[client.sessionId];
+      const monster = this.state.monsters?.[msg.monsterId];
+      if (!player || !monster || monster.hp <= 0) return;
 
-        const baseDamage = Math.max(1, (player.attack || 1) - (monster.defense || 0));
-        const crit = Math.random() < 0.1;
-        const totalDamage = Math.floor(baseDamage * (crit ? 1.5 : 1));
-        monster.hp = Math.max(0, monster.hp - totalDamage);
+      const baseDamage = Math.max(1, (player.attack || 1) - (monster.defense || 0));
+      const crit = Math.random() < 0.1;
+      const totalDamage = Math.floor(baseDamage * (crit ? 1.5 : 1));
+      monster.hp = Math.max(0, monster.hp - totalDamage);
 
-        this.safeBroadcastToMap(player.mapId, "monster_hit", {
+      this.safeBroadcastToMap(player.mapId, "monster_hit", {
+        monsterId: monster.id,
+        hp: monster.hp,
+        damage: totalDamage,
+        crit,
+        attacker: player.playerName,
+      });
+
+      if (monster.hp <= 0) {
+        this.safeBroadcastToMap(player.mapId, "monster_dead", {
           monsterId: monster.id,
-          hp: monster.hp,
-          damage: totalDamage,
-          crit,
-          attacker: player.playerName,
+          coins: monster.coins,
+          exp: monster.exp,
         });
-
-        // 🧟 Monster counterattack
-        if (monster.hp > 0 && Math.random() < 0.4) {
-          const counterDamage = Math.max(1, (monster.attack || 1) - (player.defense || 0));
-          player.hp = Math.max(0, player.hp - counterDamage);
-          this.safeBroadcastToMap(player.mapId, "player_hit", {
-            playerId: client.sessionId,
-            damage: counterDamage,
-            hp: player.hp,
-            monsterId: monster.id,
-          });
-        } else if (monster.hp <= 0) {
-          // Monster death
-          this.safeBroadcastToMap(player.mapId, "monster_dead", {
-            monsterId: monster.id,
-            coins: monster.coins,
-            exp: monster.exp,
-          });
-          player.exp += monster.exp;
-          player.coins += monster.coins;
-
-          // ✅ Safe reward logic (unchanged)
-          if (player.email && player.email !== "unknown") {
-            const url = `${REWARD_ENDPOINT}&email=${encodeURIComponent(player.email)}&monsterId=${monster.id}`;
-            this.clock.setTimeout(async () => {
-              try {
-                const fetchPromise = fetch(url);
-                const timeoutPromise = new Promise((_, reject) =>
-                  setTimeout(() => reject(new Error("reward_fetch_timeout")), 5000)
-                );
-
-                const res = await Promise.race([fetchPromise, timeoutPromise]).catch(e => {
-                  console.warn("⚠️ Reward fetch failed (caught):", e?.message || e);
-                  return null;
-                });
-
-                if (!res) return;
-                if (!res.ok) return console.warn(`⚠️ Reward endpoint returned HTTP ${res.status}`);
-
-                const body = await res.json().catch(() => null);
-                if (body) {
-                  this.safeBroadcastToMap(player.mapId, "playerReward", {
-                    email: player.email,
-                    gainedExp: body.gainedExp,
-                    gainedCoins: body.gainedCoins,
-                    exp: body.exp,
-                    maxExp: body.maxExp,
-                    mapId: player.mapId,
-                  });
-                } else {
-                  console.log(`✅ Reward call completed for ${player.email} (no JSON payload)`);
-                }
-              } catch (e) {
-                console.warn("⚠️ reward background task caught error:", e?.stack || e);
-              }
-            }, 50);
-          }
-
-          // Respawn safely
-          this.clock.setTimeout(() => this.respawnMonster(monster), 5000);
-        }
-      } catch (err) {
-        console.error("❌ attack_monster crashed:", err?.stack || err);
-      } finally {
-        console.log("◀ attack_monster end", { sessionId: client.sessionId, monsterHp: this.state.monsters?.[msg.monsterId]?.hp });
+        player.exp += monster.exp;
+        player.coins += monster.coins;
+        this.clock.setTimeout(() => this.respawnMonster(monster), 5000);
       }
     });
   }
 
   /* ============================================================
-     🧍 Player Join / Leave
+     🧍 Player Join / Leave (Map-aware)
      ============================================================ */
   async onJoin(client, options) {
     const char = characterDatabase[options.CharacterID] || characterDatabase["C001"];
     const mapId = Number(options.mapId) || 101;
 
-    this.state.players[client.sessionId] = {
+    const newPlayer = {
       id: client.sessionId,
       playerName: options.playerName || "Guest",
       email: options.email || "unknown",
@@ -292,8 +227,21 @@ class MMORPGRoom extends Room {
       coins: 0,
     };
 
+    this.state.players[client.sessionId] = newPlayer;
+
+    // 👋 Send confirmation & monsters
     client.send("join_ack", { ok: true });
     client.send("monsters_snapshot", this.state.monsters);
+
+    // 👀 Send list of players currently in the same map
+    const sameMapPlayers = Object.values(this.state.players).filter(
+      (p) => p.mapId === mapId && p.id !== client.sessionId
+    );
+    client.send("players_snapshot", sameMapPlayers);
+
+    // 📢 Notify others on the same map
+    this.safeBroadcastToMap(mapId, "player_joined", newPlayer);
+
     console.log(`✅ ${options.playerName} joined map ${mapId}`);
   }
 
@@ -301,7 +249,8 @@ class MMORPGRoom extends Room {
     const p = this.state.players[client.sessionId];
     if (!p) return;
     delete this.state.players[client.sessionId];
-    console.log(`👋 ${p.playerName} left the game.`);
+    this.safeBroadcastToMap(p.mapId, "player_left", { id: client.sessionId });
+    console.log(`👋 ${p.playerName} left map ${p.mapId}.`);
   }
 
   /* ============================================================
@@ -322,7 +271,15 @@ class MMORPGRoom extends Room {
           m.state = "walk";
           m.x += m.dir === "left" ? -30 : 30;
         } else m.state = "idle";
-        lightMonsters.push({ id: m.id, x: m.x, y: m.y, dir: m.dir, state: m.state, hp: m.hp, mapId: m.mapId });
+        lightMonsters.push({
+          id: m.id,
+          x: m.x,
+          y: m.y,
+          dir: m.dir,
+          state: m.state,
+          hp: m.hp,
+          mapId: m.mapId,
+        });
       }
       this.safeBroadcast("monsters_update", lightMonsters);
     } catch (err) {
@@ -348,12 +305,8 @@ class MMORPGRoom extends Room {
      ============================================================ */
   safeBroadcastToMap(mapId, event, data) {
     for (const c of this.clients) {
-      try {
-        const p = this.state.players[c.sessionId];
-        if (p?.mapId === mapId) c.send(event, data);
-      } catch (err) {
-        console.warn(`⚠️ Failed broadcastToMap ${event}:`, err);
-      }
+      const p = this.state.players[c.sessionId];
+      if (p?.mapId === mapId) c.send(event, data);
     }
   }
 
@@ -362,7 +315,7 @@ class MMORPGRoom extends Room {
       try {
         c.send(event, data);
       } catch (err) {
-        console.warn(`⚠️ safeBroadcast failed:`, err);
+        console.warn(`⚠️ safeBroadcast failed for ${event}:`, err);
       }
     }
   }
