@@ -10,8 +10,16 @@ const fetch = (...args) => import("node-fetch").then(({ default: fetch }) => fet
 /* ============================================================
    🧠 Process-level Safety Handlers
    ============================================================ */
-process.on("uncaughtException", (err) => console.error("🚨 Uncaught Exception:", err));
-process.on("unhandledRejection", (reason, p) => console.error("🚨 Unhandled Rejection:", reason, "Promise:", p));
+process.on("uncaughtException", (err) => {
+  console.error("🚨 Uncaught Exception:", err && err.stack ? err.stack : err);
+});
+process.on("unhandledRejection", (reason, p) => {
+  console.error("🚨 Unhandled Rejection:", reason, "Promise:", p);
+});
+process.on("exit", (code) => console.warn("⚰️ Process exiting with code:", code));
+
+// small heartbeat so container restarts are obvious in logs
+setInterval(() => console.log("💓 server alive", new Date().toISOString()), 30000);
 
 /* ============================================================
    📄 Google Apps Script Endpoints
@@ -79,7 +87,7 @@ const characterDatabase = {
     ImageURL_Walk_Left: "https://i.ibb.co/jkGCZG33/Valkyrie-RUNLEFT.gif",
     ImageURL_Walk_Right: "https://i.ibb.co/XxtZZ46d/Valkyrie-RUNRIGHT.gif",
     ImageURL_Attack_Left: "https://i.ibb.co/QSX6Q6V/Valkyrie-Attack-Left.gif",
-    ImageURL_Attack_Right: "https://i.ibb.co/xtLLKJxJ/Valkyrie-Attack-Right.gif",
+    ImageURL_Attack_Right: "https://i.ibb.co/xtLLKjxJ/Valkyrie-Attack-Right.gif",
   },
   C002: {
     Name: "Luna",
@@ -131,7 +139,6 @@ const characterDatabase = {
   },
 };
 
-
 /* ============================================================
    🏰 MMORPG Room Definition
    ============================================================ */
@@ -165,10 +172,14 @@ class MMORPGRoom extends Room {
        ⚔️ Player Attack — Safe & Non-blocking
        ============================================================ */
     this.onMessage("attack_monster", async (client, msg) => {
+      console.log("▶ attack_monster start", { sessionId: client.sessionId, msg });
       try {
         const player = this.state.players?.[client.sessionId];
         const monster = this.state.monsters?.[msg.monsterId];
-        if (!player || !monster || monster.hp <= 0) return;
+        if (!player || !monster || monster.hp <= 0) {
+          console.log("◀ attack_monster end (no player/monster or monster dead)");
+          return;
+        }
 
         const baseDamage = Math.max(1, (player.attack || 1) - (monster.defense || 0));
         const crit = Math.random() < 0.1;
@@ -203,23 +214,70 @@ class MMORPGRoom extends Room {
           player.exp += monster.exp;
           player.coins += monster.coins;
 
-          // ✅ Reward async — non-blocking
+          // ✅ Safe, non-blocking reward with timeout + catch (moved off main handler)
           if (player.email && player.email !== "unknown") {
-            (async () => {
+            const url = `${REWARD_ENDPOINT}&email=${encodeURIComponent(player.email)}&monsterId=${monster.id}`;
+
+            // schedule background task so attack handler finishes quickly
+            this.clock.setTimeout(async () => {
               try {
-                const url = `${REWARD_ENDPOINT}&email=${encodeURIComponent(player.email)}&monsterId=${monster.id}`;
-                await fetch(url);
+                // simple timeout wrapper using Promise.race to avoid hung fetch
+                const fetchPromise = fetch(url);
+                const timeoutPromise = new Promise((_, reject) =>
+                  setTimeout(() => reject(new Error("reward_fetch_timeout")), 5000)
+                );
+
+                const res = await Promise.race([fetchPromise, timeoutPromise]).catch(e => {
+                  console.warn("⚠️ Reward fetch failed (caught):", e && e.message ? e.message : e);
+                  return null;
+                });
+
+                if (!res) {
+                  console.warn("⚠️ Reward fetch returned no response.");
+                  return;
+                }
+
+                if (!res.ok) {
+                  console.warn(`⚠️ Reward endpoint returned HTTP ${res.status}`);
+                  return;
+                }
+
+                // parse JSON safely if needed
+                try {
+                  const body = await res.json().catch((e) => {
+                    console.warn("⚠️ reward response JSON parse failed:", e);
+                    return null;
+                  });
+                  if (body) {
+                    // broadcast reward info to map (optional and safe)
+                    this.safeBroadcastToMap(player.mapId, "playerReward", {
+                      email: player.email,
+                      gainedExp: body.gainedExp,
+                      gainedCoins: body.gainedCoins,
+                      exp: body.exp,
+                      maxExp: body.maxExp,
+                      mapId: player.mapId,
+                    });
+                  } else {
+                    console.log(`✅ Reward call completed for ${player.email} (no JSON payload)`);
+                  }
+                } catch (e) {
+                  console.warn("⚠️ unexpected error parsing reward response:", e);
+                }
               } catch (e) {
-                console.warn("⚠️ rewardPlayerForKill failed silently:", e);
+                console.warn("⚠️ reward background task caught error:", e && e.stack ? e.stack : e);
+                // never throw — keep errors contained
               }
-            })();
+            }, 50);
           }
 
           // Respawn safely
           this.clock.setTimeout(() => this.respawnMonster(monster), 5000);
         }
       } catch (err) {
-        console.error("❌ attack_monster crashed:", err);
+        console.error("❌ attack_monster crashed:", err && err.stack ? err.stack : err);
+      } finally {
+        console.log("◀ attack_monster end", { sessionId: client.sessionId, monsterHp: this.state.monsters?.[msg.monsterId]?.hp });
       }
     });
   }
