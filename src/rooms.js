@@ -4,11 +4,22 @@
 
 const { Room } = require("colyseus");
 
+// 🧩 Dynamic import of node-fetch for server compatibility
 const fetch = (...args) => import("node-fetch").then(({ default: fetch }) => fetch(...args));
 
+/* ============================================================
+   📄 Google Apps Script Endpoints
+   ============================================================ */
 const SHEET_ENDPOINT =
   "https://script.google.com/macros/s/AKfycbx5iXEVK7xzNwS465caDOF0ZaMdh6gi7h3xcvxySPjkeZ41LsFA0sIXKyBk3v0-ROfuzg/exec?action=getMonsters";
 
+// Replace this with your real reward endpoint
+const REWARD_ENDPOINT =
+  "https://script.google.com/macros/s/AKfycbx5iXEVK7xzNwS465caDOF0ZaMdh6gi7h3xcvxySPjkeZ41LsFA0sIXKyBk3v0-ROfuzg/exec?action=rewardPlayerForKill";
+
+/* ============================================================
+   🧩 Load Monsters from Google Sheets
+   ============================================================ */
 async function loadMonstersFromSheet() {
   try {
     const res = await fetch(SHEET_ENDPOINT);
@@ -77,7 +88,9 @@ class MMORPGRoom extends Room {
     this.spawnMonsters();
     this.clock.setInterval(() => this.updateMonsterMovement(), 2000);
 
-    // Player Movement
+    // ============================================================
+    // 🚶 Player Movement
+    // ============================================================
     this.onMessage("move", (client, msg) => {
       const p = this.state.players[client.sessionId];
       if (!p) return;
@@ -88,9 +101,9 @@ class MMORPGRoom extends Room {
     });
 
     // ============================================================
-    // ⚔️ Player Attack — Safe & Crash-Proof Version
+    // ⚔️ Player Attack — Safe & Email-Integrated Version
     // ============================================================
-    this.onMessage("attack_monster", (client, msg) => {
+    this.onMessage("attack_monster", async (client, msg) => {
       try {
         if (!msg || typeof msg.monsterId === "undefined") {
           console.warn("⚠️ attack_monster: Missing monsterId", msg);
@@ -153,9 +166,23 @@ class MMORPGRoom extends Room {
             exp: monster.exp,
           });
 
-          // Reward player
+          // ✅ Reward player locally
           player.exp = (player.exp || 0) + monster.exp;
           player.coins = (player.coins || 0) + monster.coins;
+
+          // ✅ Update Google Sheet asynchronously
+          if (player.email && player.email !== "unknown") {
+            try {
+              const url = `${REWARD_ENDPOINT}&email=${encodeURIComponent(player.email)}&monsterId=${encodeURIComponent(monster.id)}`;
+              const rewardRes = await fetch(url);
+              const rewardJson = await rewardRes.json().catch(() => ({}));
+              console.log(`🎁 Synced reward for ${player.email}:`, rewardJson);
+            } catch (e) {
+              console.error(`❌ rewardPlayerForKill failed for ${player.email}:`, e);
+            }
+          } else {
+            console.warn(`⚠️ Player ${player.playerName} has no valid email; skipping Sheets reward.`);
+          }
 
           // Respawn monster after delay
           this.clock.setTimeout(() => this.respawnMonster(monster), 5000);
@@ -166,6 +193,9 @@ class MMORPGRoom extends Room {
     });
   }
 
+  /* ============================================================
+     🧍 Player Join / Leave
+     ============================================================ */
   async onJoin(client, options) {
     const safeName = options.playerName || "Guest";
     const safeChar = characterDatabase[options.CharacterID] || characterDatabase["C001"];
@@ -174,6 +204,7 @@ class MMORPGRoom extends Room {
     this.state.players[client.sessionId] = {
       id: client.sessionId,
       playerName: safeName,
+      email: options.email || "unknown", // ✅ NEW LINE
       mapId,
       x: 200,
       y: 200,
@@ -188,7 +219,7 @@ class MMORPGRoom extends Room {
 
     client.send("join_ack", { ok: true });
     client.send("monsters_snapshot", this.state.monsters);
-    console.log(`✅ ${safeName} joined map ${mapId}`);
+    console.log(`✅ ${safeName} joined map ${mapId} (email: ${options.email || "unknown"})`);
   }
 
   onLeave(client) {
@@ -198,6 +229,9 @@ class MMORPGRoom extends Room {
     console.log(`👋 Player left: ${p.playerName}`);
   }
 
+  /* ============================================================
+     🧟 Monster Spawning / Movement / Respawn
+     ============================================================ */
   spawnMonsters() {
     this.monsterTemplates.forEach((t) => {
       this.state.monsters[t.id] = { ...t };
@@ -227,6 +261,9 @@ class MMORPGRoom extends Room {
     this.broadcastToMap(monster.mapId, "monster_respawn", monster);
   }
 
+  /* ============================================================
+     📡 Utility: Send message only to players in same map
+     ============================================================ */
   broadcastToMap(mapId, event, data) {
     this.clients.forEach((c) => {
       const p = this.state.players[c.sessionId];
