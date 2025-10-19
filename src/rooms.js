@@ -169,21 +169,95 @@ class MMORPGRoom extends Room {
         attacker: player.playerName,
       });
 
+      console.log(`⚔️ ${player.playerName} hit ${monster.name} for ${damage} damage`);
+
       if (monster.hp <= 0) {
-        this.broadcastToMap(player.mapId, "monster_dead", {
-          monsterId: monster.id,
-          coins: monster.coins,
-          exp: monster.exp,
-        });
-
-        // Reward player
-        player.exp = (player.exp || 0) + monster.exp;
-        player.coins = (player.coins || 0) + monster.coins;
-
-        // Respawn monster
-        this.clock.setTimeout(() => this.respawnMonster(monster), 5000);
+        this.handleMonsterDeath(player, monster);
+      } else {
+        this.scheduleMonsterCounterAttack(player, monster);
       }
     });
+
+    /* ============================================================
+       Player Skill Attack → Damage Monsters
+       ============================================================ */
+    this.onMessage("skill_attack", (client, msg) => {
+      const player = this.state.players[client.sessionId];
+      const monster = this.state.monsters[msg.monsterId];
+      if (!player || !monster) return;
+
+      const baseDamage = Number(player.attack) || 10;
+      const skillBonus = Number(msg.damage || 0);
+      const totalDamage = Math.max(1, Math.floor(baseDamage + skillBonus - monster.defense));
+
+      monster.hp -= totalDamage;
+
+      this.broadcastToMap(player.mapId, "monster_hit", {
+        monsterId: monster.id,
+        hp: monster.hp,
+        damage: totalDamage,
+        attacker: player.playerName,
+        skillName: msg.skillName || "Skill Attack",
+      });
+
+      console.log(`🔥 ${player.playerName} used ${msg.skillName || "Skill"} on ${monster.name}, -${totalDamage} HP`);
+
+      if (monster.hp <= 0) {
+        this.handleMonsterDeath(player, monster);
+      } else {
+        this.scheduleMonsterCounterAttack(player, monster);
+      }
+    });
+  }
+
+  /* ============================================================
+     💀 Handle Monster Death
+     ============================================================ */
+  handleMonsterDeath(player, monster) {
+    this.broadcastToMap(player.mapId, "monster_dead", {
+      monsterId: monster.id,
+      coins: monster.coins,
+      exp: monster.exp,
+    });
+
+    // Reward player
+    player.exp = (player.exp || 0) + monster.exp;
+    player.coins = (player.coins || 0) + monster.coins;
+
+    console.log(`💰 ${player.playerName} gained ${monster.coins} coins and ${monster.exp} EXP`);
+
+    // Respawn monster
+    this.clock.setTimeout(() => this.respawnMonster(monster), 5000);
+  }
+
+  /* ============================================================
+     🧠 Monster Counterattack Logic
+     ============================================================ */
+  scheduleMonsterCounterAttack(player, monster) {
+    this.clock.setTimeout(() => {
+      if (!player || !monster) return;
+      if (monster.hp <= 0) return;
+
+      const dmg = Math.max(1, Math.floor(monster.attack - player.defense / 2));
+      player.hp -= dmg;
+      if (player.hp < 0) player.hp = 0;
+
+      this.broadcastToMap(player.mapId, "player_hit", {
+        playerId: player.id,
+        hp: player.hp,
+        damage: dmg,
+        attacker: monster.name,
+      });
+
+      console.log(`🩸 ${monster.name} counter-attacked ${player.playerName} for ${dmg} damage`);
+
+      if (player.hp <= 0) {
+        this.broadcastToMap(player.mapId, "player_dead", {
+          playerId: player.id,
+          name: player.playerName,
+        });
+      }
+    }, 1000); // attack after 1s
   }
 
   /* ============================================================
