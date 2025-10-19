@@ -8,6 +8,16 @@ const { Room } = require("colyseus");
 const fetch = (...args) => import("node-fetch").then(({ default: fetch }) => fetch(...args));
 
 /* ============================================================
+   Process-level safety handlers
+   ============================================================ */
+process.on("uncaughtException", (err) => {
+  console.error("🚨 Uncaught Exception (server):", err);
+});
+process.on("unhandledRejection", (reason, p) => {
+  console.error("🚨 Unhandled Rejection (server):", reason, "promise:", p);
+});
+
+/* ============================================================
    📄 Google Apps Script Endpoints
    ============================================================ */
 const SHEET_ENDPOINT =
@@ -66,11 +76,72 @@ async function loadMonstersFromSheet() {
 // 🧩 Character Database (Player Templates)
 // ============================================================
 const characterDatabase = {
-  C001: { /* ... keep your character definitions unchanged ... */ },
-  C002: { /* ... */ },
-  C003: { /* ... */ },
-  C004: { /* ... */ },
+  C001: {
+    Name: "Myca",
+    Class: "Valkyrie",
+    BaseHP: 85,
+    BaseMana: 90,
+    Attack: 30,
+    Defense: 13,
+    Speed: 10,
+    CritDamage: 140,
+    ImageURL_IdleFront: "https://i.ibb.co/rGMF3kCd/Valkyrie-Front.gif",
+    ImageURL_IdleBack: "https://i.ibb.co/kg0WkTrt/Valkyrie-Back.gif",
+    ImageURL_Walk_Left: "https://i.ibb.co/jkGCZG33/Valkyrie-RUNLEFT.gif",
+    ImageURL_Walk_Right: "https://i.ibb.co/XxtZZ46d/Valkyrie-RUNRIGHT.gif",
+    ImageURL_Attack_Left: "https://i.ibb.co/QSX6Q6V/Valkyrie-Attack-Left.gif",
+    ImageURL_Attack_Right: "https://i.ibb.co/xtLLKJxJ/Valkyrie-Attack-Right.gif",
+  },
+  C002: {
+    Name: "Luna",
+    Class: "Dark Oracle",
+    BaseHP: 60,
+    BaseMana: 100,
+    Attack: 40,
+    Defense: 5,
+    Speed: 8,
+    CritDamage: 100,
+    ImageURL_IdleFront: "https://i.ibb.co/0p8hBvDX/ezgif-com-animated-gif-maker.gif",
+    ImageURL_IdleBack: "https://i.ibb.co/n87HYqwW/ezgif-com-rotate-2.gif",
+    ImageURL_Walk_Left: "https://i.ibb.co/LXz5t6pN/ezgif-com-rotate.gif",
+    ImageURL_Walk_Right: "https://i.ibb.co/SDpYsNsN/Running-front.gif",
+    ImageURL_Attack_Left: "https://i.ibb.co/WWKvhRKP/ezgif-com-rotate.gif",
+    ImageURL_Attack_Right: "https://i.ibb.co/GvbYv6qv/Swing-front.gif",
+  },
+  C003: {
+    Name: "Mike",
+    Class: "Mino Warrior",
+    BaseHP: 80,
+    BaseMana: 80,
+    Attack: 25,
+    Defense: 20,
+    Speed: 8,
+    CritDamage: 100,
+    ImageURL_IdleFront: "https://i.ibb.co/s9rWsbfs/Mino-Idle-Right.gif",
+    ImageURL_IdleBack: "https://i.ibb.co/PvgKK96J/Mino-Idle-Left.gif",
+    ImageURL_Walk_Left: "https://i.ibb.co/n8jBKBB1/Mino-Run-Left.gif",
+    ImageURL_Walk_Right: "https://i.ibb.co/Jj5dH23t/Mino-Run-Right.gif",
+    ImageURL_Attack_Left: "https://i.ibb.co/kVZxqB8G/Mino-Slash-Left.gif",
+    ImageURL_Attack_Right: "https://i.ibb.co/sdVH803V/Mino-Slash-Right.gif",
+  },
+  C004: {
+    Name: "Mizo",
+    Class: "Necromancer",
+    BaseHP: 60,
+    BaseMana: 100,
+    Attack: 35,
+    Defense: 15,
+    Speed: 8,
+    CritDamage: 100,
+    ImageURL_IdleFront: "https://i.ibb.co/ynHNt0LQ/IDLE-RIGHT.gif",
+    ImageURL_IdleBack: "https://i.ibb.co/qYjYdMG6/IDLE-LEFT.gif",
+    ImageURL_Walk_Left: "https://i.ibb.co/YBMvpGzG/RUN-LEFT.gif",
+    ImageURL_Walk_Right: "https://i.ibb.co/D3DYmMv/RUN-RIGHT.gif",
+    ImageURL_Attack_Left: "https://i.ibb.co/DPDXwnWM/ATTACK-LEFT.gif",
+    ImageURL_Attack_Right: "https://i.ibb.co/mrMCxpJM/ATTACK-RIGHT.gif",
+  },
 };
+
 
 // ============================================================
 // 🏰 MMORPG Room Definition
@@ -97,13 +168,18 @@ class MMORPGRoom extends Room {
       p.x = msg.x;
       p.y = msg.y;
       p.dir = msg.dir;
-      this.broadcastToMap(p.mapId, "player_move", { id: client.sessionId, ...p });
+      try {
+        this.broadcastToMap(p.mapId, "player_move", { id: client.sessionId, ...p });
+      } catch (err) {
+        console.error("⚠️ Error broadcasting player_move:", err);
+      }
     });
 
     // ============================================================
-    // ⚔️ Player Attack — Safe & Email-Integrated Version
+    // ⚔️ Player Attack — Hardened and defensive
     // ============================================================
     this.onMessage("attack_monster", async (client, msg) => {
+      console.log("🧾 attack_monster received from", client.sessionId, "payload:", msg);
       try {
         if (!msg || typeof msg.monsterId === "undefined") {
           console.warn("⚠️ attack_monster: Missing monsterId", msg);
@@ -123,72 +199,101 @@ class MMORPGRoom extends Room {
         }
         if (monster.hp <= 0) return;
 
-        // ✅ Safe damage calculation
-        const baseDamage = Math.max(1, player.attack - monster.defense);
-        const crit = Math.random() < 0.1;
-        const totalDamage = Math.floor(baseDamage * (crit ? 1.5 : 1.0));
+        // Safe damage calculation (use defaults if fields missing)
+        const attackerAttack = Number(player.attack || 1);
+        const monsterDefense = Number(monster.defense || 0);
+        const baseDamage = Math.max(1, attackerAttack - monsterDefense);
+        const critChance = Number(player.critChance ?? 0.1);
+        const critDamageMultiplier = (Number(player.critDamage) || 150) / 100; // default 1.5
+        const crit = Math.random() < critChance;
+        const totalDamage = Math.floor(baseDamage * (crit ? critDamageMultiplier : 1.0));
         monster.hp = Math.max(0, monster.hp - totalDamage);
 
-        // Broadcast monster being hit
-        this.broadcastToMap(player.mapId, "monster_hit", {
-          monsterId: monster.id,
-          hp: monster.hp,
-          damage: totalDamage,
-          crit,
-          attacker: player.playerName,
-        });
+        // Broadcast monster being hit (use safe broadcastToMap)
+        try {
+          this.broadcastToMap(player.mapId, "monster_hit", {
+            monsterId: monster.id,
+            hp: monster.hp,
+            damage: totalDamage,
+            crit,
+            attacker: player.playerName,
+          });
+        } catch (bErr) {
+          console.error("⚠️ broadcastToMap failed (monster_hit):", bErr);
+        }
 
         // 🧟 Counterattack logic
         if (monster.hp > 0) {
           if (Math.random() < 0.4) {
-            const counterDamage = Math.max(1, monster.attack - player.defense);
+            const counterDamage = Math.max(1, (monster.attack || 1) - (player.defense || 0));
             player.hp = Math.max(0, player.hp - counterDamage);
 
-            this.broadcastToMap(player.mapId, "player_hit", {
-              playerId: client.sessionId,
-              damage: counterDamage,
-              hp: player.hp,
-              monsterId: monster.id,
-            });
+            try {
+              this.broadcastToMap(player.mapId, "player_hit", {
+                playerId: client.sessionId,
+                damage: counterDamage,
+                hp: player.hp,
+                monsterId: monster.id,
+              });
+            } catch (bErr2) {
+              console.error("⚠️ broadcastToMap failed (player_hit):", bErr2);
+            }
 
             if (player.hp <= 0) {
-              this.broadcastToMap(player.mapId, "player_dead", {
-                playerId: client.sessionId,
-                by: monster.name,
-              });
+              try {
+                this.broadcastToMap(player.mapId, "player_dead", {
+                  playerId: client.sessionId,
+                  by: monster.name,
+                });
+              } catch (bErr3) {
+                console.error("⚠️ broadcastToMap failed (player_dead):", bErr3);
+              }
             }
           }
         } else {
           // 🪙 Monster died
-          this.broadcastToMap(player.mapId, "monster_dead", {
-            monsterId: monster.id,
-            coins: monster.coins,
-            exp: monster.exp,
-          });
+          try {
+            this.broadcastToMap(player.mapId, "monster_dead", {
+              monsterId: monster.id,
+              coins: monster.coins,
+              exp: monster.exp,
+            });
+          } catch (bErr4) {
+            console.error("⚠️ broadcastToMap failed (monster_dead):", bErr4);
+          }
 
           // ✅ Reward player locally
-          player.exp = (player.exp || 0) + monster.exp;
-          player.coins = (player.coins || 0) + monster.coins;
+          player.exp = (player.exp || 0) + (monster.exp || 0);
+          player.coins = (player.coins || 0) + (monster.coins || 0);
 
-          // ✅ Update Google Sheet asynchronously
+          // ✅ Fire-and-forget update to Google Sheet asynchronously so it can't crash handler
           if (player.email && player.email !== "unknown") {
-            try {
-              const url = `${REWARD_ENDPOINT}&email=${encodeURIComponent(player.email)}&monsterId=${encodeURIComponent(monster.id)}`;
-              const rewardRes = await fetch(url);
-              const rewardJson = await rewardRes.json().catch(() => ({}));
-              console.log(`🎁 Synced reward for ${player.email}:`, rewardJson);
-            } catch (e) {
-              console.error(`❌ rewardPlayerForKill failed for ${player.email}:`, e);
-            }
+            (async () => {
+              try {
+                const url = `${REWARD_ENDPOINT}&email=${encodeURIComponent(player.email)}&monsterId=${encodeURIComponent(monster.id)}`;
+                const rewardRes = await fetch(url);
+                const rewardJson = await rewardRes.json().catch(() => ({}));
+                console.log(`🎁 Synced reward for ${player.email}:`, rewardJson);
+              } catch (e) {
+                console.error(`❌ rewardPlayerForKill (async) failed for ${player.email}:`, e);
+              }
+            })();
           } else {
             console.warn(`⚠️ Player ${player.playerName} has no valid email; skipping Sheets reward.`);
           }
 
-          // Respawn monster after delay
-          this.clock.setTimeout(() => this.respawnMonster(monster), 5000);
+          // Respawn monster after delay (safe call)
+          this.clock.setTimeout(() => {
+            try {
+              this.respawnMonster(monster);
+            } catch (rErr) {
+              console.error("⚠️ respawnMonster error:", rErr);
+            }
+          }, 5000);
         }
       } catch (err) {
-        console.error("❌ attack_monster crashed:", err);
+        console.error("❌ attack_monster crashed (protected):", err);
+        // do not rethrow
       }
     });
   }
@@ -215,18 +320,43 @@ class MMORPGRoom extends Room {
       exp: 0,
       coins: 0,
       sprites: safeChar,
+      isConnected: true,
+      disconnectedAt: null,
     };
 
-    client.send("join_ack", { ok: true });
-    client.send("monsters_snapshot", this.state.monsters);
+    try {
+      client.send("join_ack", { ok: true });
+      client.send("monsters_snapshot", this.state.monsters);
+    } catch (err) {
+      console.warn(`⚠️ Failed to send join ack/monsters_snapshot to ${client.sessionId}:`, err);
+    }
+
     console.log(`✅ ${safeName} joined map ${mapId} (email: ${options.email || "unknown"})`);
   }
 
   onLeave(client) {
     const p = this.state.players[client.sessionId];
     if (!p) return;
-    delete this.state.players[client.sessionId];
-    console.log(`👋 Player left: ${p.playerName}`);
+
+    // Mark as disconnected instead of immediate deletion
+    p.disconnectedAt = Date.now();
+    p.isConnected = false;
+    console.log(`👋 Player left (marked for cleanup): ${p.playerName} (${client.sessionId})`);
+
+    // Remove from state after a short grace period (30s)
+    const GRACE_MS = 30 * 1000;
+    this.clock.setTimeout(() => {
+      try {
+        const current = this.state.players[client.sessionId];
+        if (!current) return; // already cleaned up
+        if (current.isConnected === false && Date.now() - (current.disconnectedAt || 0) >= GRACE_MS) {
+          delete this.state.players[client.sessionId];
+          console.log(`🧹 Player cleaned up: ${p.playerName} (${client.sessionId})`);
+        }
+      } catch (err) {
+        console.error("⚠️ Error during onLeave cleanup:", err);
+      }
+    }, GRACE_MS);
   }
 
   /* ============================================================
@@ -240,34 +370,85 @@ class MMORPGRoom extends Room {
   }
 
   updateMonsterMovement() {
-    for (const m of Object.values(this.state.monsters)) {
-      if (m.hp <= 0) continue;
-      if (Math.random() < 0.5) {
-        m.dir = Math.random() < 0.5 ? "left" : "right";
-        m.state = "walk";
-        m.x += m.dir === "left" ? -30 : 30;
-      } else {
-        m.state = "idle";
+    try {
+      for (const m of Object.values(this.state.monsters)) {
+        if (m.hp <= 0) continue;
+        if (Math.random() < 0.5) {
+          m.dir = Math.random() < 0.5 ? "left" : "right";
+          m.state = "walk";
+          m.x += m.dir === "left" ? -30 : 30;
+        } else {
+          m.state = "idle";
+        }
       }
+      // Use safe broadcast to all clients
+      try {
+        this.safeBroadcast("monsters_update", this.state.monsters);
+      } catch (bErr) {
+        console.error("⚠️ safeBroadcast failed (monsters_update):", bErr);
+      }
+    } catch (err) {
+      console.error("⚠️ updateMonsterMovement error:", err);
     }
-    this.broadcast("monsters_update", this.state.monsters);
   }
 
   respawnMonster(monster) {
-    monster.hp = monster.maxHP;
-    monster.x += Math.random() * 100 - 50;
-    monster.y += Math.random() * 60 - 30;
-    monster.state = "idle";
-    this.broadcastToMap(monster.mapId, "monster_respawn", monster);
+    try {
+      monster.hp = monster.maxHP;
+      monster.x += Math.random() * 100 - 50;
+      monster.y += Math.random() * 60 - 30;
+      monster.state = "idle";
+      // Use broadcastToMap (safe)
+      try {
+        this.broadcastToMap(monster.mapId, "monster_respawn", monster);
+      } catch (bErr) {
+        console.error("⚠️ broadcastToMap failed (monster_respawn):", bErr);
+      }
+    } catch (err) {
+      console.error("⚠️ respawnMonster error:", err);
+    }
   }
 
   /* ============================================================
-     📡 Utility: Send message only to players in same map
+     📡 Utility: Safe broadcast helpers
      ============================================================ */
+
+  // Send message only to players in same map (safe per-client send)
   broadcastToMap(mapId, event, data) {
     this.clients.forEach((c) => {
-      const p = this.state.players[c.sessionId];
-      if (p?.mapId === mapId) c.send(event, data);
+      try {
+        const p = this.state.players[c.sessionId];
+        if (p?.mapId === mapId) {
+          try {
+            c.send(event, data);
+          } catch (sendErr) {
+            console.warn(`⚠️ Failed to send ${event} to client ${c.sessionId}:`, sendErr);
+          }
+        }
+      } catch (err) {
+        console.error("⚠️ broadcastToMap iteration error:", err);
+      }
+    });
+  }
+
+  // Broadcast to all connected clients (safe)
+  safeBroadcast(event, data) {
+    this.clients.forEach((c) => {
+      try {
+        // Only send to clients that have a player record and are on a map (avoid undefined)
+        const p = this.state.players[c.sessionId];
+        if (!p) {
+          // still attempt to send if no player object? skip to be safe
+          return;
+        }
+        try {
+          c.send(event, data);
+        } catch (sendErr) {
+          console.warn(`⚠️ Failed to send ${event} to client ${c.sessionId}:`, sendErr);
+        }
+      } catch (err) {
+        console.error("⚠️ safeBroadcast iteration error:", err);
+      }
     });
   }
 
