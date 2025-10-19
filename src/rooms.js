@@ -87,21 +87,36 @@ class MMORPGRoom extends Room {
       this.broadcastToMap(p.mapId, "player_move", { id: client.sessionId, ...p });
     });
 
-    // Player Attack
+    // ============================================================
+    // ⚔️ Player Attack — Safe & Crash-Proof Version
+    // ============================================================
     this.onMessage("attack_monster", (client, msg) => {
       try {
-        const player = this.state.players?.[client.sessionId];
-        if (!player) return;
+        if (!msg || typeof msg.monsterId === "undefined") {
+          console.warn("⚠️ attack_monster: Missing monsterId", msg);
+          return;
+        }
 
+        const player = this.state.players?.[client.sessionId];
         const monster = this.state.monsters?.[msg.monsterId];
-        if (!monster) return;
+
+        if (!player) {
+          console.warn("⚠️ attack_monster: Player not found", client.sessionId);
+          return;
+        }
+        if (!monster) {
+          console.warn("⚠️ attack_monster: Monster not found", msg.monsterId);
+          return;
+        }
         if (monster.hp <= 0) return;
 
+        // ✅ Safe damage calculation
         const baseDamage = Math.max(1, player.attack - monster.defense);
         const crit = Math.random() < 0.1;
         const totalDamage = Math.floor(baseDamage * (crit ? 1.5 : 1.0));
         monster.hp = Math.max(0, monster.hp - totalDamage);
 
+        // Broadcast monster being hit
         this.broadcastToMap(player.mapId, "monster_hit", {
           monsterId: monster.id,
           hp: monster.hp,
@@ -110,6 +125,7 @@ class MMORPGRoom extends Room {
           attacker: player.playerName,
         });
 
+        // 🧟 Counterattack logic
         if (monster.hp > 0) {
           if (Math.random() < 0.4) {
             const counterDamage = Math.max(1, monster.attack - player.defense);
@@ -130,19 +146,22 @@ class MMORPGRoom extends Room {
             }
           }
         } else {
+          // 🪙 Monster died
           this.broadcastToMap(player.mapId, "monster_dead", {
             monsterId: monster.id,
             coins: monster.coins,
             exp: monster.exp,
           });
 
+          // Reward player
           player.exp = (player.exp || 0) + monster.exp;
           player.coins = (player.coins || 0) + monster.coins;
 
+          // Respawn monster after delay
           this.clock.setTimeout(() => this.respawnMonster(monster), 5000);
         }
       } catch (err) {
-        console.error("❌ attack_monster failed:", err);
+        console.error("❌ attack_monster crashed:", err);
       }
     });
   }
