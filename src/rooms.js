@@ -506,14 +506,25 @@ this.onMessage("monster_killed", (client, msg) => {
     this.monsterTemplates.forEach((t) => {
       const id = String(t.id || t.MonsterID || `M${Date.now()}`);
       const mapId = Number(t.mapId || t.MapID || 101);
+
+      // ✅ Build full monster object with sprite and combat data
       this.state.monsters[id] = {
         ...t,
         id,
         mapId,
-        hp: t.BaseHP || 100,
-        maxHP: t.BaseHP || 100,
+        name: t.name || t.Name || `Monster_${id}`,
+        hp: t.BaseHP || t.hp || 100,
+        maxHP: t.BaseHP || t.hp || 100,
         x: t.SpawnX || Math.random() * 800,
         y: t.SpawnY || Math.random() * 600,
+        sprites: t.sprites || {
+          idleLeft: t.ImageURL_IdleLeft,
+          idleRight: t.ImageURL_IdleRight,
+          walkLeft: t.ImageURL_Walk_Left,
+          walkRight: t.ImageURL_Walk_Right,
+          attackLeft: t.ImageURL_Attack_Left,
+          attackRight: t.ImageURL_Attack_Right,
+        },
         state: "idle",
         target: null,
       };
@@ -526,6 +537,7 @@ this.onMessage("monster_killed", (client, msg) => {
       const updates = [];
       for (const m of Object.values(this.state.monsters)) {
         if (m.hp <= 0) continue;
+
         if (m.state === "aggro" && m.target && this.state.players[m.target]) {
           const target = this.state.players[m.target];
           if (!target || target.mapId !== m.mapId) {
@@ -545,9 +557,25 @@ this.onMessage("monster_killed", (client, msg) => {
         } else if (Math.random() < 0.5) {
           m.state = "walk";
           m.x += Math.random() < 0.5 ? -20 : 20;
-        } else m.state = "idle";
-        updates.push({ id: m.id, x: m.x, y: m.y, dir: m.dir, state: m.state, hp: m.hp });
+        } else {
+          m.state = "idle";
+        }
+
+        // ✅ Include full monster metadata in broadcast update
+        updates.push({
+          id: m.id,
+          name: m.name,
+          mapId: m.mapId,
+          x: m.x,
+          y: m.y,
+          dir: m.dir,
+          state: m.state,
+          hp: m.hp,
+          sprites: m.sprites || {}, // ✅ add this line
+        });
       }
+
+      // Broadcast to all clients
       this.safeBroadcast("monsters_update", updates);
     } catch (err) {
       console.error("⚠️ updateMonsterMovement failed:", err);
@@ -561,14 +589,23 @@ this.onMessage("monster_killed", (client, msg) => {
     monster.x += Math.random() * 50 - 25;
     monster.y += Math.random() * 30 - 15;
 
+    // ✅ Send full respawn data including sprite info
     this.safeBroadcastToMap(monster.mapId, "monster_respawn", {
       id: monster.id,
+      name: monster.name,
+      mapId: monster.mapId,
       x: Math.round(monster.x),
       y: Math.round(monster.y),
       hp: monster.hp,
+      maxHP: monster.maxHP,
+      sprites: monster.sprites || {},
     });
-    console.log(`🧟‍♂️ Monster ${monster.name} respawned at (${Math.round(monster.x)}, ${Math.round(monster.y)})`);
+
+    console.log(
+      `🧟‍♂️ Monster ${monster.name} respawned at (${Math.round(monster.x)}, ${Math.round(monster.y)})`
+    );
   }
+
 
   /* ============================================================
      📡 SAFE BROADCAST
