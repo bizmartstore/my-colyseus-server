@@ -261,16 +261,9 @@ class MMORPGRoom extends Room {
       console.log(`🌍 ${player.playerName} moved from Map ${oldMap} → ${newMap}`);
       player.mapId = newMap;
 
-      // Remove from old map
       this.safeBroadcastToMap(oldMap, "player_left", { id: client.sessionId });
+      this.safeBroadcastToMap(newMap, "player_joined", { id: client.sessionId, player });
 
-      // Add to new map
-      this.safeBroadcastToMap(newMap, "player_joined", {
-        id: client.sessionId,
-        player,
-      });
-
-      // Send fresh snapshot
       const sameMapPlayers = {};
       for (const [id, p] of Object.entries(this.state.players)) {
         if (p.mapId === newMap) sameMapPlayers[id] = p;
@@ -279,47 +272,36 @@ class MMORPGRoom extends Room {
     });
 
     /* ============================================================
-   📨 Manual Player Snapshot Request
-   ============================================================ */
-this.onMessage("request_players", (client) => {
-  const requester = this.state.players[client.sessionId];
-  if (!requester) return;
+       📨 Manual Player Snapshot Request
+       ============================================================ */
+    this.onMessage("request_players", (client) => {
+      const requester = this.state.players[client.sessionId];
+      if (!requester) return;
 
-  const sameMapPlayers = {};
-  for (const [id, p] of Object.entries(this.state.players)) {
-    if (p.mapId === requester.mapId) sameMapPlayers[id] = p;
-  }
-  client.send("players_snapshot", sameMapPlayers);
-});
+      const sameMapPlayers = {};
+      for (const [id, p] of Object.entries(this.state.players)) {
+        if (p.mapId === requester.mapId) sameMapPlayers[id] = p;
+      }
+      client.send("players_snapshot", sameMapPlayers);
+    });
 
-/* ============================================================
-   🧩 Compatibility Fix – Prevent client disconnects
-   ============================================================ */
-this.onMessage("pong", (client, data) => {
-  // just acknowledge the ping-pong (prevent warning)
-  // console.log(`🏓 Pong received from ${client.sessionId}`);
-});
+    /* ============================================================
+       🧩 Compatibility Fix – Prevent client disconnects
+       ============================================================ */
+    this.onMessage("pong", (client) => {});
+    this.onMessage("monsterUpdate", (client, data) => {
+      const m = this.state.monsters?.[data.monsterId];
+      if (m) m.hp = data.hp ?? m.hp;
+    });
+    this.onMessage("playerReward", () => {});
 
-this.onMessage("monsterUpdate", (client, data) => {
-  // prevent disconnection when client sends this
-  const m = this.state.monsters?.[data.monsterId];
-  if (m) {
-    m.hp = data.hp ?? m.hp;
-  }
-  // console.log(`🧩 monsterUpdate ignored on server: ${data.monsterId}`);
-});
-
-this.onMessage("playerReward", (client, data) => {
-  // safely ignore this (client already handles rewards visually)
-  // console.log(`🎁 playerReward ignored for ${data?.email}`);
-});
+  } // ✅ properly closes onCreate()
 
   /* ============================================================
      🧍 Player Join
      ============================================================ */
   onJoin(client, options) {
     console.log("✨ Player joined:", client.sessionId, options);
-
     const safeEmail = options.email || `guest_${Math.random().toString(36).substring(2, 8)}@game.local`;
     const safeName = options.playerName || "Guest";
     const safeCharacterID = options.CharacterID || "C001";
@@ -357,15 +339,11 @@ this.onMessage("playerReward", (client, data) => {
     };
 
     console.log(`✅ ${safeName} (${safeEmail}) joined Map ${mapId} as ${charData.Class}`);
-
-    // Send snapshot of players in same map
     const sameMapPlayers = {};
     for (const [id, other] of Object.entries(this.state.players)) {
       if (other.mapId === mapId) sameMapPlayers[id] = other;
     }
     client.send("players_snapshot", sameMapPlayers);
-
-    // Notify others
     this.safeBroadcastToMap(mapId, "player_joined", {
       id: client.sessionId,
       player: this.state.players[client.sessionId],
@@ -378,7 +356,6 @@ this.onMessage("playerReward", (client, data) => {
   onLeave(client) {
     const player = this.state.players[client.sessionId];
     if (!player) return;
-
     console.log(`👋 Player left: ${player.playerName} (${client.sessionId})`);
     this.safeBroadcastToMap(player.mapId, "player_left", { id: client.sessionId });
     delete this.state.players[client.sessionId];
@@ -464,12 +441,5 @@ this.onMessage("playerReward", (client, data) => {
     console.log("🧹 MMORPGRoom disposed.");
   }
 }
-
-
-
-
-
-
-
 
 module.exports = { MMORPGRoom };
