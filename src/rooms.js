@@ -140,19 +140,6 @@ class MMORPGRoom extends Room {
     this.setSeatReservationTime(20);
 
     try {
-      this.setState({ players: {}, monsters: {} });
-      console.log("✅ [DEBUG] Initial room state set (players + monsters)");
-
-      /* ============================================================
- 🌍 MMORPG Room Class
-============================================================ */
-class MMORPGRoom extends Room {
-  async onCreate() {
-    const startTime = Date.now();
-    console.log("🌍 [DEBUG] MMORPGRoom created!");
-    this.setSeatReservationTime(20);
-
-    try {
       // ============================================================
       // 🧠 INITIAL STATE
       // ============================================================
