@@ -444,4 +444,32 @@ class MMORPGRoom extends Room {
   }
 }
 
+room.onMessage("monster_killed", (client, msg) => {
+  const player = this.state.players[client.sessionId];
+  if (!player) return;
+
+  const monsterId = msg.monsterId;
+  const monster = this.state.monsters?.[monsterId];
+  if (!monster) return;
+
+  // Confirm death + broadcast
+  monster.hp = 0;
+  this.broadcast("monster_dead", { monsterId });
+
+  // Respawn after delay (server-authoritative)
+  this.clock.setTimeout(() => {
+    monster.hp = monster.maxHP;
+    monster.x = Math.random() * 800;
+    monster.y = Math.random() * 600;
+    this.broadcast("monster_respawn", {
+      monsterId,
+      x: monster.x,
+      y: monster.y,
+      hp: monster.hp,
+      mapId: player.mapId
+    });
+  }, 8000);
+});
+
+
 module.exports = { MMORPGRoom };
