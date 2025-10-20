@@ -147,7 +147,7 @@ class MMORPGRoom extends Room {
     this.spawnMonsters();
 
     // 🧭 Lightweight monster movement update every 2s
-    this.clock.setInterval(() => this.updateMonsterMovement(), 2000);
+    this.clock.setInterval(() => this.updateMonsterMovement(), 1000);
 
     /* ============================================================
        🕐 Keep-alive Ping Handler
@@ -402,23 +402,51 @@ class MMORPGRoom extends Room {
 
   /* ============================================================
      🧟 Monster Logic
-     ============================================================ */
+   ============================================================ */
   spawnMonsters() {
-    this.monsterTemplates.forEach((t) => (this.state.monsters[t.id] = { ...t }));
+    // 🧹 Clear any old monsters before spawning
+    this.state.monsters = {};
+
+    // 🧩 Spawn all monsters from template
+    for (const t of this.monsterTemplates) {
+      this.state.monsters[t.id] = { ...t };
+    }
+
     console.log(`🧟 Spawned ${Object.keys(this.state.monsters).length} monsters`);
+
+    // 🧠 Group monsters by map for initial broadcast
+    const monstersByMap = {};
+    for (const m of Object.values(this.state.monsters)) {
+      if (!monstersByMap[m.mapId]) monstersByMap[m.mapId] = [];
+      monstersByMap[m.mapId].push(m);
+    }
+
+    // ✅ Send initial monster list to players on same map
+    for (const [mapId, list] of Object.entries(monstersByMap)) {
+      this.safeBroadcastToMap(Number(mapId), "monsters_update", list);
+    }
   }
 
   updateMonsterMovement() {
     try {
-      const lightMonsters = [];
+      // ✅ Step 1: Group monsters by map
+      const monstersByMap = {};
+
       for (const m of Object.values(this.state.monsters)) {
         if (m.hp <= 0) continue;
+
+        // 🎲 Random movement pattern
         if (Math.random() < 0.5) {
           m.dir = Math.random() < 0.5 ? "left" : "right";
           m.state = "walk";
           m.x += m.dir === "left" ? -30 : 30;
-        } else m.state = "idle";
-        lightMonsters.push({
+        } else {
+          m.state = "idle";
+        }
+
+        // Add monster to its map group
+        if (!monstersByMap[m.mapId]) monstersByMap[m.mapId] = [];
+        monstersByMap[m.mapId].push({
           id: m.id,
           x: m.x,
           y: m.y,
@@ -428,7 +456,11 @@ class MMORPGRoom extends Room {
           mapId: m.mapId,
         });
       }
-      this.safeBroadcast("monsters_update", lightMonsters);
+
+      // ✅ Step 2: Broadcast to players only on same map
+      for (const [mapId, list] of Object.entries(monstersByMap)) {
+        this.safeBroadcastToMap(Number(mapId), "monsters_update", list);
+      }
     } catch (err) {
       console.error("⚠️ updateMonsterMovement failed:", err);
     }
@@ -439,13 +471,17 @@ class MMORPGRoom extends Room {
     monster.x += Math.random() * 100 - 50;
     monster.y += Math.random() * 60 - 30;
     monster.state = "idle";
+
+    // ✅ Broadcast respawn only to players in the same map
     this.safeBroadcastToMap(monster.mapId, "monster_respawn", {
       id: monster.id,
       x: monster.x,
       y: monster.y,
       hp: monster.hp,
+      mapId: monster.mapId,
     });
   }
+
 
   /* ============================================================
      📡 Safe Broadcast Utilities
