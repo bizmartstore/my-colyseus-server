@@ -180,74 +180,89 @@ class MMORPGRoom extends Room {
     });
 
     /* ============================================================
-       ⚔️ Player Attack (vs Monsters)
-       ============================================================ */
-    this.onMessage("attack_monster", async (client, msg) => {
-      const player = this.state.players?.[client.sessionId];
-      const monster = this.state.monsters?.[msg.monsterId];
-      if (!player || !monster || monster.hp <= 0) return;
+   ⚔️ Player Attack (vs Monsters) — Final Synced Version
+   ============================================================ */
+this.onMessage("attack_monster", async (client, msg) => {
+  try {
+    const player = this.state.players?.[client.sessionId];
+    const monster = this.state.monsters?.[msg.monsterId];
+    if (!player || !monster) return;
+    if (monster.hp <= 0) return; // skip dead monsters
 
-      const baseDamage = Math.max(1, (player.attack || 1) - (monster.defense || 0));
-      const crit = Math.random() < 0.1;
-      const totalDamage = Math.floor(baseDamage * (crit ? 1.5 : 1));
-      monster.hp = Math.max(0, monster.hp - totalDamage);
+    // 🧮 Damage calculation
+    const baseAtk = Number(player.attack || msg.baseATK || 10);
+    const def = Number(monster.defense || 0);
+    const skillPower = Number(msg.skillPower || 0);
+    const crit = !!msg.crit;
+    const defenseFactor = 100 / (100 + def);
+    const rawDamage = baseAtk + skillPower * 0.6;
+    const totalDamage = Math.max(1, Math.floor(rawDamage * defenseFactor * (crit ? 1.5 : 1)));
 
-      this.safeBroadcastToMap(player.mapId, "monster_hit", {
-        monsterId: monster.id,
-        hp: monster.hp,
-        damage: totalDamage,
-        crit,
-        attacker: player.playerName,
-      });
+    monster.hp = Math.max(0, monster.hp - totalDamage);
 
-      if (monster.hp <= 0) {
-  // 🧟 Broadcast death to all players on same map
-  this.safeBroadcastToMap(player.mapId, "monster_dead", {
-    monsterId: monster.id,
-    coins: monster.coins,
-    exp: monster.exp,
-  });
-
-  // Update player stats
-  player.exp = (player.exp || 0) + monster.exp;
-  player.coins = (player.coins || 0) + monster.coins;
-
-  // 🧠 Server-side reward request to Google Apps Script
-  (async () => {
-    try {
-      const url = `${REWARD_ENDPOINT}&email=${encodeURIComponent(player.email)}&monsterId=${encodeURIComponent(monster.id)}`;
-      const res = await fetch(url);
-      const reward = await res.json();
-
-      // ✅ Broadcast reward back to all clients
-      this.safeBroadcastToMap(player.mapId, "playerReward", {
-        email: player.email,
-        gainedExp: reward.gainedExp ?? monster.exp,
-        gainedCoins: reward.gainedCoins ?? monster.coins,
-        exp: reward.exp ?? player.exp,
-        maxExp: reward.maxExp ?? (player.maxExp || 100),
-        level: reward.level ?? (player.level || 1),
-        mapId: player.mapId,
-      });
-    } catch (err) {
-      console.error("⚠️ reward fetch failed:", err);
-      // Fallback broadcast
-      this.safeBroadcastToMap(player.mapId, "playerReward", {
-        email: player.email,
-        gainedExp: monster.exp,
-        gainedCoins: monster.coins,
-        exp: player.exp,
-        maxExp: player.maxExp || 100,
-        level: player.level || 1,
-        mapId: player.mapId,
-      });
-    }
-  })();
-
-  // 🕐 Schedule respawn
-  this.clock.setTimeout(() => this.respawnMonster(monster), 5000);
-}
+    // 🩸 Broadcast damage to everyone on same map
+    this.safeBroadcastToMap(player.mapId, "monster_damaged", {
+      monsterId: monster.id,
+      hp: monster.hp,
+      maxHP: monster.maxHP,
+      damage: totalDamage,
+      crit,
+      attacker: player.playerName,
     });
+
+    // 💀 Death + Reward
+    if (monster.hp <= 0) {
+      console.log(`💀 Monster ${monster.id} killed by ${player.playerName}`);
+
+      // 🎁 Send monster_dead event
+      this.safeBroadcastToMap(player.mapId, "monster_dead", {
+        monsterId: monster.id,
+        exp: monster.exp,
+        coins: monster.coins,
+      });
+
+      // Update player stats
+      player.exp = (player.exp || 0) + monster.exp;
+      player.coins = (player.coins || 0) + monster.coins;
+
+      // 🧠 Try rewarding via Google Apps Script
+      (async () => {
+        try {
+          const url = `${REWARD_ENDPOINT}&email=${encodeURIComponent(player.email)}&monsterId=${encodeURIComponent(monster.id)}`;
+          const res = await fetch(url);
+          const reward = await res.json();
+
+          this.safeBroadcastToMap(player.mapId, "playerReward", {
+            email: player.email,
+            gainedExp: reward.gainedExp ?? monster.exp,
+            gainedCoins: reward.gainedCoins ?? monster.coins,
+            exp: reward.exp ?? player.exp,
+            maxExp: reward.maxExp ?? (player.maxExp || 100),
+            level: reward.level ?? (player.level || 1),
+            mapId: player.mapId,
+          });
+        } catch (err) {
+          console.warn("⚠️ Reward fetch failed:", err);
+          this.safeBroadcastToMap(player.mapId, "playerReward", {
+            email: player.email,
+            gainedExp: monster.exp,
+            gainedCoins: monster.coins,
+            exp: player.exp,
+            maxExp: player.maxExp || 100,
+            level: player.level || 1,
+            mapId: player.mapId,
+          });
+        }
+      })();
+
+      // 🕐 Respawn in 5s
+      this.clock.setTimeout(() => this.respawnMonster(monster), 5000);
+    }
+  } catch (err) {
+    console.error("❌ attack_monster failed:", err);
+  }
+});
+
 
     /* ============================================================
        ⚔️ Player Attack (vs Players)
