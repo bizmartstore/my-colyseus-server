@@ -201,15 +201,52 @@ class MMORPGRoom extends Room {
       });
 
       if (monster.hp <= 0) {
-        this.safeBroadcastToMap(player.mapId, "monster_dead", {
-          monsterId: monster.id,
-          coins: monster.coins,
-          exp: monster.exp,
-        });
-        player.exp = (player.exp || 0) + monster.exp;
-        player.coins = (player.coins || 0) + monster.coins;
-        this.clock.setTimeout(() => this.respawnMonster(monster), 5000);
-      }
+  // 🧟 Broadcast death to all players on same map
+  this.safeBroadcastToMap(player.mapId, "monster_dead", {
+    monsterId: monster.id,
+    coins: monster.coins,
+    exp: monster.exp,
+  });
+
+  // Update player stats
+  player.exp = (player.exp || 0) + monster.exp;
+  player.coins = (player.coins || 0) + monster.coins;
+
+  // 🧠 Server-side reward request to Google Apps Script
+  (async () => {
+    try {
+      const url = `${REWARD_ENDPOINT}&email=${encodeURIComponent(player.email)}&monsterId=${encodeURIComponent(monster.id)}`;
+      const res = await fetch(url);
+      const reward = await res.json();
+
+      // ✅ Broadcast reward back to all clients
+      this.safeBroadcastToMap(player.mapId, "playerReward", {
+        email: player.email,
+        gainedExp: reward.gainedExp ?? monster.exp,
+        gainedCoins: reward.gainedCoins ?? monster.coins,
+        exp: reward.exp ?? player.exp,
+        maxExp: reward.maxExp ?? (player.maxExp || 100),
+        level: reward.level ?? (player.level || 1),
+        mapId: player.mapId,
+      });
+    } catch (err) {
+      console.error("⚠️ reward fetch failed:", err);
+      // Fallback broadcast
+      this.safeBroadcastToMap(player.mapId, "playerReward", {
+        email: player.email,
+        gainedExp: monster.exp,
+        gainedCoins: monster.coins,
+        exp: player.exp,
+        maxExp: player.maxExp || 100,
+        level: player.level || 1,
+        mapId: player.mapId,
+      });
+    }
+  })();
+
+  // 🕐 Schedule respawn
+  this.clock.setTimeout(() => this.respawnMonster(monster), 5000);
+}
     });
 
     /* ============================================================
@@ -443,33 +480,5 @@ class MMORPGRoom extends Room {
     console.log("🧹 MMORPGRoom disposed.");
   }
 }
-
-room.onMessage("monster_killed", (client, msg) => {
-  const player = this.state.players[client.sessionId];
-  if (!player) return;
-
-  const monsterId = msg.monsterId;
-  const monster = this.state.monsters?.[monsterId];
-  if (!monster) return;
-
-  // Confirm death + broadcast
-  monster.hp = 0;
-  this.broadcast("monster_dead", { monsterId });
-
-  // Respawn after delay (server-authoritative)
-  this.clock.setTimeout(() => {
-    monster.hp = monster.maxHP;
-    monster.x = Math.random() * 800;
-    monster.y = Math.random() * 600;
-    this.broadcast("monster_respawn", {
-      monsterId,
-      x: monster.x,
-      y: monster.y,
-      hp: monster.hp,
-      mapId: player.mapId
-    });
-  }, 8000);
-});
-
 
 module.exports = { MMORPGRoom };
