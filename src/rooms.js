@@ -161,7 +161,7 @@ class MMORPGRoom extends Room {
     this.setState({ players: {}, monsters: {} });
 
 // 🕒 Prevent auto-dispose — keep room alive as long as 1+ players exist
-this.autoDispose = false;
+this.autoDispose = true;
 
 // 🩵 Keep-alive ping to ensure Render doesn’t suspend the instance
 this.clock.setInterval(() => {
@@ -429,14 +429,15 @@ this.clock.setInterval(() => {
   this.safeBroadcastToMap(player.mapId, "player_left", { id: client.sessionId });
   delete this.state.players[client.sessionId];
 
-  // 🧹 Only dispose room when truly empty
+  // 🧹 Let Colyseus auto-dispose instead of manual disconnect
   if (Object.keys(this.state.players).length === 0) {
-    console.log("⚠️ No players left. Disposing room in 30 seconds...");
-    this.clock.setTimeout(() => {
-      if (Object.keys(this.state.players).length === 0) this.disconnect();
-    }, 30000);
+    console.log("⚠️ No players left — scheduling safe disposal (no manual disconnect).");
+    this.lock(); // prevent new joins
+    // do NOT call this.disconnect()
+    // Colyseus will safely dispose room when autoDispose = true
   }
 }
+
 
 
   // ============================================================
@@ -523,13 +524,13 @@ this.clock.setInterval(() => {
   try {
     if (!monster) return;
 
-    // 🧱 Guard: no clients → skip broadcast to avoid disconnection errors
-    if (!this.clients || this.clients.length === 0) {
-      console.warn(`⚠️ Skipping respawn for ${monster.id} — no connected clients.`);
+    // 🚧 If no players or clients, delay respawn to avoid closing-room race
+    if (!this.clients || this.clients.length === 0 || Object.keys(this.state.players).length === 0) {
+      console.warn(`⚠️ Delaying respawn for ${monster.id} — no active clients.`);
+      this.clock.setTimeout(() => this.respawnMonster(monster), 5000);
       return;
     }
 
-    // ♻️ Reset monster data safely
     monster.hp = monster.maxHP;
     monster.x += Math.random() * 100 - 50;
     monster.y += Math.random() * 60 - 30;
@@ -547,17 +548,16 @@ this.clock.setInterval(() => {
       state: monster.state,
     };
 
-    // 📡 Safe broadcast only if connected
+    // 📡 Broadcast safely
     this.safeBroadcastToMap(monster.mapId, "monster_respawn", respawnData);
 
-    // 💾 Persist updated position
     this.persistMonsterPositions();
-
     console.log(`🔄 Monster ${monster.id} respawned on map ${monster.mapId}`);
   } catch (err) {
     console.warn("⚠️ respawnMonster failed:", err);
   }
 }
+
 
 
 // ============================================================
