@@ -160,6 +160,15 @@ class MMORPGRoom extends Room {
     this.setSeatReservationTime(20);
     this.setState({ players: {}, monsters: {} });
 
+// 🕒 Prevent auto-dispose — keep room alive as long as 1+ players exist
+this.autoDispose = false;
+
+// 🩵 Keep-alive ping to ensure Render doesn’t suspend the instance
+this.clock.setInterval(() => {
+  console.log("💓 [KeepAlive] Room active with", Object.keys(this.state.players).length, "players");
+}, 30000);
+
+
     // 📜 Load and spawn monsters
     try {
       this.monsterTemplates = await loadMonstersFromSheet();
@@ -410,12 +419,22 @@ class MMORPGRoom extends Room {
   }
 
   onLeave(client) {
-    const player = this.state.players[client.sessionId];
-    if (!player) return;
-    console.log(`👋 Player left: ${player.playerName} (${client.sessionId})`);
-    this.safeBroadcastToMap(player.mapId, "player_left", { id: client.sessionId });
-    delete this.state.players[client.sessionId];
+  const player = this.state.players[client.sessionId];
+  if (!player) return;
+
+  console.log(`👋 Player left: ${player.playerName} (${client.sessionId})`);
+  this.safeBroadcastToMap(player.mapId, "player_left", { id: client.sessionId });
+  delete this.state.players[client.sessionId];
+
+  // 🧹 Only dispose room when truly empty
+  if (Object.keys(this.state.players).length === 0) {
+    console.log("⚠️ No players left. Disposing room in 30 seconds...");
+    this.clock.setTimeout(() => {
+      if (Object.keys(this.state.players).length === 0) this.disconnect();
+    }, 30000);
   }
+}
+
 
   // ============================================================
   // 🧟 Monster Logic
