@@ -161,7 +161,7 @@ class MMORPGRoom extends Room {
     this.setState({ players: {}, monsters: {} });
 
 // 🕒 Prevent auto-dispose — keep room alive as long as 1+ players exist
-this.autoDispose = true;
+this.autoDispose = false;
 
 // 🩵 Keep-alive ping to ensure Render doesn’t suspend the instance
 this.clock.setInterval(() => {
