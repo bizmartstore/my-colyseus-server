@@ -208,10 +208,13 @@ this.clock.setInterval(() => {
 
     // ⚔️ Attack Monster
     this.onMessage("attack_monster", async (client, msg) => {
-      try {
-        const player = this.state.players?.[client.sessionId];
-        const monster = this.state.monsters?.[msg.monsterId];
-        if (!player || !monster || monster.hp <= 0) return;
+  try {
+    if (!client || !client.sessionId) return;
+    if (!msg || !msg.monsterId) return;
+
+    const player = this.state.players?.[client.sessionId];
+    const monster = this.state.monsters?.[String(msg.monsterId)];
+    if (!player || !monster || monster.hp <= 0) return;
 
         const baseAtk = Number(player.attack || msg.baseATK || 10);
         const def = Number(monster.defense || 0);
@@ -440,76 +443,136 @@ this.clock.setInterval(() => {
   // 🧟 Monster Logic
   // ============================================================
   spawnMonsters() {
-    this.state.monsters = {};
-    for (const t of this.monsterTemplates) {
-      const id = String(t.id);
-      this.state.monsters[id] = { ...t, id };
-    }
-    const total = Object.keys(this.state.monsters).length;
-    console.log(`🧟 Spawned ${total} monsters`);
-    this.persistMonsterPositions();
+  this.state.monsters = {};
+  for (const t of this.monsterTemplates) {
+    const id = String(t.id);
+    this.state.monsters[id] = { ...t, id };
   }
+  const total = Object.keys(this.state.monsters).length;
+  console.log(`🧟 Spawned ${total} monsters`);
+
+  // Group minimal info by map and broadcast
+  const monstersByMap = {};
+  for (const m of Object.values(this.state.monsters)) {
+    const payload = {
+      monsterId: String(m.id),
+      x: Math.round(m.x || 0),
+      y: Math.round(m.y || 0),
+      hp: Math.floor(m.hp || m.maxHP || 0),
+      maxHP: Math.floor(m.maxHP || 0),
+      dir: m.dir || "left",
+      state: m.state || "idle",
+      mapId: m.mapId,
+    };
+    if (!monstersByMap[m.mapId]) monstersByMap[m.mapId] = [];
+    monstersByMap[m.mapId].push(payload);
+  }
+
+  for (const [mapId, list] of Object.entries(monstersByMap)) {
+    this.safeBroadcastToMap(Number(mapId), "monsters_update", list);
+  }
+
+  // Save initial positions without blocking other logic
+  this.persistMonsterPositions();
+}
+
 
   updateMonsterMovement() {
-    try {
-      const monstersByMap = {};
-      for (const m of Object.values(this.state.monsters)) {
-        if (m.hp <= 0) continue;
-        if (Math.random() < 0.5) {
-          m.dir = Math.random() < 0.5 ? "left" : "right";
-          m.state = "walk";
-          m.x += m.dir === "left" ? -30 : 30;
-          m.x = Math.max(0, Math.min(2000, m.x));
-        } else {
-          m.state = "idle";
-        }
-        if (!monstersByMap[m.mapId]) monstersByMap[m.mapId] = [];
-        monstersByMap[m.mapId].push(m);
+  try {
+    const monstersByMap = {};
+
+    for (const m of Object.values(this.state.monsters)) {
+      if (!m || m.hp <= 0) continue;
+
+      // Random movement
+      if (Math.random() < 0.5) {
+        m.dir = Math.random() < 0.5 ? "left" : "right";
+        m.state = "walk";
+        m.x += m.dir === "left" ? -30 : 30;
+        m.x = Math.max(0, Math.min(2000, m.x));
+      } else {
+        m.state = "idle";
       }
-      for (const [mapId, list] of Object.entries(monstersByMap)) {
-        this.safeBroadcastToMap(Number(mapId), "monsters_update", list);
-      }
-      if (Math.random() < 0.2) this.persistMonsterPositions();
-    } catch (err) {
-      console.error("⚠️ updateMonsterMovement failed:", err);
+
+      const payload = {
+        monsterId: String(m.id),
+        x: Math.round(m.x || 0),
+        y: Math.round(m.y || 0),
+        dir: m.dir,
+        state: m.state,
+        hp: Math.max(0, Math.floor(m.hp || 0)),
+        mapId: m.mapId,
+      };
+
+      if (!monstersByMap[m.mapId]) monstersByMap[m.mapId] = [];
+      monstersByMap[m.mapId].push(payload);
     }
+
+    for (const [mapId, list] of Object.entries(monstersByMap)) {
+      this.safeBroadcastToMap(Number(mapId), "monsters_update", list);
+    }
+
+    if (Math.random() < 0.2) this.persistMonsterPositions();
+  } catch (err) {
+    console.error("⚠️ updateMonsterMovement failed:", err);
   }
+}
+
 
   respawnMonster(monster) {
+  try {
+    if (!monster) return;
+
     monster.hp = monster.maxHP;
     monster.x += Math.random() * 100 - 50;
     monster.y += Math.random() * 60 - 30;
     monster.state = "idle";
     monster.dir = Math.random() < 0.5 ? "left" : "right";
-    this.safeBroadcastToMap(monster.mapId, "monster_respawn", monster);
+
+    const respawnData = {
+      monsterId: String(monster.id),
+      x: Math.round(monster.x),
+      y: Math.round(monster.y),
+      hp: Math.floor(monster.hp),
+      maxHP: Math.floor(monster.maxHP || monster.hp),
+      dir: monster.dir,
+      mapId: monster.mapId,
+      state: monster.state,
+    };
+
+    this.safeBroadcastToMap(monster.mapId, "monster_respawn", respawnData);
     this.persistMonsterPositions();
+    console.log(`🔄 Monster ${monster.id} respawned on map ${monster.mapId}`);
+  } catch (err) {
+    console.warn("⚠️ respawnMonster failed:", err);
   }
+}
+
+
 
   // ============================================================
   // 📡 Safe Broadcast Utilities
   // ============================================================
   safeBroadcastToMap(mapId, event, data) {
-    for (const c of this.clients) {
+  for (const c of this.clients) {
+    try {
       const p = this.state.players[c.sessionId];
-      if (p?.mapId === mapId) {
-        try {
-          c.send(event, data);
-        } catch (err) {
-          console.warn(`⚠️ Failed to send ${event} to ${c.sessionId}:`, err);
-        }
-      }
-    }
-  }
+      if (!p || Number(p.mapId) !== Number(mapId)) continue;
 
-  safeBroadcast(event, data) {
-    for (const c of this.clients) {
-      try {
-        c.send(event, data);
-      } catch (err) {
-        console.warn(`⚠️ safeBroadcast failed for ${event}:`, err);
+      // avoid sending to closed sockets (ws OPEN === 1)
+      if (c.connection && typeof c.connection.readyState !== "undefined") {
+        if (c.connection.readyState !== 1) continue;
       }
+
+      c.send(event, data);
+    } catch (err) {
+      console.warn(`⚠️ Failed to send ${event} to ${c.sessionId}:`, err);
     }
   }
+}
+
+
+
 
   onDispose() {
     console.log("🧹 MMORPGRoom disposed — saving final monster positions...");
