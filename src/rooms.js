@@ -371,57 +371,85 @@ this.clock.setInterval(() => {
   }
 
   // ============================================================
-  // 🧍 Player Join / Leave
-  // ============================================================
-  onJoin(client, options) {
-    console.log("✨ Player joined:", client.sessionId, options);
-    const safeEmail = options.email || `guest_${Math.random().toString(36).substring(2, 8)}@game.local`;
-    const safeName = options.playerName || "Guest";
-    const safeCharacterID = options.CharacterID || "C001";
-    const charData = characterDatabase[safeCharacterID] || characterDatabase["C001"];
-    const mapId = Number(options.mapId) || 1;
-    const posX = Number(options.x) || 200;
-    const posY = Number(options.y) || 200;
+// 🧍 Player Join / Leave
+// ============================================================
+onJoin(client, options) {
+  console.log("✨ Player joined:", client.sessionId, options);
+  const safeEmail =
+    options.email ||
+    `guest_${Math.random().toString(36).substring(2, 8)}@game.local`;
+  const safeName = options.playerName || "Guest";
+  const safeCharacterID = options.CharacterID || "C001";
+  const charData =
+    characterDatabase[safeCharacterID] || characterDatabase["C001"];
+  const mapId = Number(options.mapId) || 1;
+  const posX = Number(options.x) || 200;
+  const posY = Number(options.y) || 200;
 
-    this.state.players[client.sessionId] = {
-      id: client.sessionId,
-      email: safeEmail,
-      playerName: safeName,
-      CharacterID: safeCharacterID,
-      characterClass: charData.Class,
-      mapId,
-      x: posX,
-      y: posY,
-      dir: options.dir || "down",
-      hp: charData.BaseHP,
-      mp: charData.BaseMana,
-      attack: charData.Attack,
-      defense: charData.Defense,
-      speed: charData.Speed,
-      critDamage: charData.CritDamage,
-      exp: 0,
-      coins: 0,
-      sprites: {
-        walkLeft: charData.ImageURL_Walk_Left,
-        walkRight: charData.ImageURL_Walk_Right,
-        attackLeft: charData.ImageURL_Attack_Left,
-        attackRight: charData.ImageURL_Attack_Right,
-      },
-    };
+  this.state.players[client.sessionId] = {
+    id: client.sessionId,
+    email: safeEmail,
+    playerName: safeName,
+    CharacterID: safeCharacterID,
+    characterClass: charData.Class,
+    mapId,
+    x: posX,
+    y: posY,
+    dir: options.dir || "down",
+    hp: charData.BaseHP,
+    mp: charData.BaseMana,
+    attack: charData.Attack,
+    defense: charData.Defense,
+    speed: charData.Speed,
+    critDamage: charData.CritDamage,
+    exp: 0,
+    coins: 0,
+    sprites: {
+      walkLeft: charData.ImageURL_Walk_Left,
+      walkRight: charData.ImageURL_Walk_Right,
+      attackLeft: charData.ImageURL_Attack_Left,
+      attackRight: charData.ImageURL_Attack_Right,
+    },
+  };
 
-    console.log(`✅ ${safeName} (${safeEmail}) joined Map ${mapId} as ${charData.Class}`);
-    const sameMapPlayers = {};
-    for (const [id, other] of Object.entries(this.state.players)) {
-      if (other.mapId === mapId) sameMapPlayers[id] = other;
-    }
-    client.send("players_snapshot", sameMapPlayers);
-    this.safeBroadcastToMap(mapId, "player_joined", {
-      id: client.sessionId,
-      player: this.state.players[client.sessionId],
-    });
+  console.log(
+    `✅ ${safeName} (${safeEmail}) joined Map ${mapId} as ${charData.Class}`
+  );
+
+  // ✅ Send players currently in the same map
+  const sameMapPlayers = {};
+  for (const [id, other] of Object.entries(this.state.players)) {
+    if (other.mapId === mapId) sameMapPlayers[id] = other;
   }
+  client.send("players_snapshot", sameMapPlayers);
 
-  onLeave(client) {
+  // ✅ NEW: Send monsters currently in the same map
+  const sameMapMonsters = {};
+  for (const [id, m] of Object.entries(this.state.monsters)) {
+    if (Number(m.mapId) === Number(mapId)) {
+      sameMapMonsters[id] = {
+        monsterId: String(m.id),
+        x: Math.round(m.x),
+        y: Math.round(m.y),
+        hp: Math.floor(m.hp),
+        maxHP: Math.floor(m.maxHP || m.hp),
+        dir: m.dir,
+        state: m.state,
+        mapId: m.mapId,
+        sprites: m.sprites,
+      };
+    }
+  }
+  client.send("monsters_snapshot", sameMapMonsters);
+
+  // Broadcast join to others
+  this.safeBroadcastToMap(mapId, "player_joined", {
+    id: client.sessionId,
+    player: this.state.players[client.sessionId],
+  });
+}
+
+onLeave(client) {
   const player = this.state.players[client.sessionId];
   if (!player) return;
 
@@ -429,26 +457,43 @@ this.clock.setInterval(() => {
   this.safeBroadcastToMap(player.mapId, "player_left", { id: client.sessionId });
   delete this.state.players[client.sessionId];
 
-  // 🧹 Let Colyseus auto-dispose instead of manual disconnect
-  if (Object.keys(this.state.players).length === 0) {
-    console.log("⚠️ No players left — scheduling safe disposal (no manual disconnect).");
-    this.lock(); // prevent new joins
-    // do NOT call this.disconnect()
-    // Colyseus will safely dispose room when autoDispose = true
-  }
+  // 🚫 Keep room alive for monster persistence
+  console.log("🕓 Room remains active for monster persistence.");
 }
 
 
 
-  // ============================================================
-  // 🧟 Monster Logic
-  // ============================================================
-  spawnMonsters() {
+// ============================================================
+// 🧟 Monster Logic
+// ============================================================
+async spawnMonsters() {
   this.state.monsters = {};
+
+  // 🧩 Try loading saved monster positions (if your sheet supports it)
+  let savedPositions = {};
+  try {
+    const res = await fetch(`${SHEET_ENDPOINT}&action=getSavedPositions`);
+    const data = await res.json();
+    if (Array.isArray(data)) {
+      for (const m of data) savedPositions[m.id] = m;
+      console.log(`📥 Loaded ${data.length} saved monster positions`);
+    }
+  } catch (err) {
+    console.warn("⚠️ No saved positions found, using defaults.");
+  }
+
   for (const t of this.monsterTemplates) {
     const id = String(t.id);
-    this.state.monsters[id] = { ...t, id };
+    const saved = savedPositions[id] || {};
+    this.state.monsters[id] = {
+      ...t,
+      id,
+      x: saved.x ?? t.x,
+      y: saved.y ?? t.y,
+      hp: saved.hp ?? t.hp,
+    };
   }
+
   const total = Object.keys(this.state.monsters).length;
   console.log(`🧟 Spawned ${total} monsters`);
 
@@ -478,7 +523,7 @@ this.clock.setInterval(() => {
 }
 
 
-  updateMonsterMovement() {
+updateMonsterMovement() {
   try {
     const monstersByMap = {};
 
@@ -513,6 +558,7 @@ this.clock.setInterval(() => {
       this.safeBroadcastToMap(Number(mapId), "monsters_update", list);
     }
 
+    // Periodically save to Sheet
     if (Math.random() < 0.2) this.persistMonsterPositions();
   } catch (err) {
     console.error("⚠️ updateMonsterMovement failed:", err);
@@ -520,12 +566,16 @@ this.clock.setInterval(() => {
 }
 
 
-  respawnMonster(monster) {
+respawnMonster(monster) {
   try {
     if (!monster) return;
 
-    // 🚧 If no players or clients, delay respawn to avoid closing-room race
-    if (!this.clients || this.clients.length === 0 || Object.keys(this.state.players).length === 0) {
+    // 🚧 Delay respawn if no players are around
+    if (
+      !this.clients ||
+      this.clients.length === 0 ||
+      Object.keys(this.state.players).length === 0
+    ) {
       console.warn(`⚠️ Delaying respawn for ${monster.id} — no active clients.`);
       this.clock.setTimeout(() => this.respawnMonster(monster), 5000);
       return;
@@ -551,12 +601,14 @@ this.clock.setInterval(() => {
     // 📡 Broadcast safely
     this.safeBroadcastToMap(monster.mapId, "monster_respawn", respawnData);
 
+    // Save new position
     this.persistMonsterPositions();
     console.log(`🔄 Monster ${monster.id} respawned on map ${monster.mapId}`);
   } catch (err) {
     console.warn("⚠️ respawnMonster failed:", err);
   }
 }
+
 
 
 
