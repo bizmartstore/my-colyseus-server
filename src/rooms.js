@@ -31,37 +31,61 @@ const REWARD_ENDPOINT =
   "https://script.google.com/macros/s/AKfycbx5iXEVK7xzNwS465caDOF0ZaMdh6gi7h3xcvxySPjkeZ41LsFA0sIXKyBk3v0-ROfuzg/exec?action=rewardPlayerForKill";
 
 /* ============================================================
-   🧩 Load Monsters from Google Sheets
+   🧩 Load Monsters from Google Sheets (Updated Persistent-Safe)
    ============================================================ */
 async function loadMonstersFromSheet() {
   try {
     const res = await fetch(SHEET_ENDPOINT);
     const data = await res.json();
-    if (!Array.isArray(data) || data.length === 0) return [];
 
-    return data.map((m) => ({
-      id: m.MonsterID,
-      name: m.Name,
-      level: Number(m.Level) || 1,
-      maxHP: Number(m.BaseHP) || 100,
-      hp: Number(m.CurrentHP) || Number(m.BaseHP) || 100,
-      attack: Number(m.Attack) || 10,
-      defense: Number(m.Defense) || 5,
-      speed: Number(m.Speed) || 5,
-      critDamage: Number(m.CritDamage) || 100,
-      critChance: Number(m.CritChance) || 10,
-      mapId: Number(m.MapID) || 101,
-      x: Number(m.PositionX) || 500,
-      y: Number(m.PositionY) || 260,
-      coins: Math.floor((Number(m.Attack) + Number(m.Level)) / 2) || 10,
-      exp: Math.floor(Number(m.Level) * 5 + 10),
-      sprites: {
-        idleLeft: m.ImageURL_IdleLeft,
-        idleRight: m.ImageURL_IdleRight,
-      },
-      state: "idle",
-      dir: "left",
-    }));
+    if (!Array.isArray(data) || data.length === 0) {
+      console.warn("⚠️ No monster data returned from Sheet");
+      return [];
+    }
+
+    return data.map((m) => {
+      // 🔹 Safe numeric parsing
+      const level = Number(m.Level) || 1;
+      const baseHP = Number(m.BaseHP) || 100;
+      const currentHP = Number(m.CurrentHP) || baseHP;
+      const attack = Number(m.Attack) || 10;
+      const defense = Number(m.Defense) || 5;
+      const speed = Number(m.Speed) || 5;
+      const critDmg = Number(m.CritDamage) || 100;
+      const critChance = Number(m.CritChance) || 10;
+      const mapId = Number(m.MapID) || 101;
+      const posX = Number(m.PositionX) || 500;
+      const posY = Number(m.PositionY) || 260;
+
+      // 🔹 Derived values
+      const coins = Math.floor((attack + level) / 2) || 10;
+      const exp = Math.floor(level * 5 + 10);
+
+      // ✅ Return normalized monster object
+      return {
+        id: String(m.MonsterID),        // 🔥 Always string for consistency
+        name: m.Name || "Unknown",
+        level,
+        maxHP: baseHP,
+        hp: currentHP,
+        attack,
+        defense,
+        speed,
+        critDamage: critDmg,
+        critChance,
+        mapId,
+        x: posX,
+        y: posY,
+        coins,
+        exp,
+        sprites: {
+          idleLeft: m.ImageURL_IdleLeft || "",
+          idleRight: m.ImageURL_IdleRight || "",
+        },
+        state: "idle",
+        dir: "left",
+      };
+    });
   } catch (err) {
     console.error("❌ Failed to fetch monsters:", err);
     return [];
@@ -140,14 +164,36 @@ class MMORPGRoom extends Room {
     this.setState({ players: {}, monsters: {} });
 
     /* ============================================================
-       📜 Load and Spawn Monsters
+       📜 Load and Spawn Monsters (From Google Sheets)
        ============================================================ */
-    this.monsterTemplates = await loadMonstersFromSheet();
-    console.log(`📜 Loaded ${this.monsterTemplates.length} monsters`);
+    try {
+      this.monsterTemplates = await loadMonstersFromSheet();
+      console.log(`📜 Loaded ${this.monsterTemplates.length} monsters from Sheets`);
+    } catch (err) {
+      console.error("❌ Failed to load monsters from sheet:", err);
+      this.monsterTemplates = [];
+    }
+
+    // 🧩 Spawn monsters into state
     this.spawnMonsters();
 
-    // 🧭 Lightweight monster movement update every 2s
+    /* ============================================================
+       ⏱️ Monster AI & Movement Loop (Server-Authoritative)
+       ============================================================ */
+    // Update monster movement every 1 second
     this.clock.setInterval(() => this.updateMonsterMovement(), 1000);
+
+    // 💾 Persist monster positions every 10 seconds (reduces data loss)
+    // Start 5s after room creation to allow spawnMonsters() to finish
+    this.clock.setTimeout(() => {
+      this.clock.setInterval(() => {
+        try {
+          this.persistMonsterPositions();
+        } catch (err) {
+          console.warn("⚠️ Failed to persist monster positions:", err);
+        }
+      }, 10000);
+    }, 5000);
 
     /* ============================================================
        🕐 Keep-alive Ping Handler
@@ -155,6 +201,47 @@ class MMORPGRoom extends Room {
     this.onMessage("ping", (client) => {
       client.send("pong", { ok: true, t: Date.now() });
     });
+
+    console.log("✅ MMORPGRoom fully initialized and ready!");
+  }
+
+  /* ============================================================
+     🚶 PERSISTENT MONSTER POSITION (Save to Google Sheets)
+     ============================================================ */
+  async persistMonsterPositions() {
+    try {
+      const monsters = Object.values(this.state.monsters).map((m) => ({
+        id: String(m.id),
+        mapId: m.mapId,
+        x: Math.round(m.x),
+        y: Math.round(m.y),
+        hp: Math.floor(m.hp),
+      }));
+
+      // 🔹 Avoid empty writes
+      if (monsters.length === 0) {
+        console.warn("⚠️ No monsters found to persist.");
+        return;
+      }
+
+      // 🔹 POST request to Apps Script endpoint
+      const response = await fetch(`${SHEET_ENDPOINT}&action=savePositions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ monsters }),
+      });
+
+      if (!response.ok) {
+        console.warn(`⚠️ persistMonsterPositions: HTTP ${response.status}`);
+        return;
+      }
+
+      const result = await response.json().catch(() => ({}));
+      console.log(`💾 Saved ${monsters.length} monster positions.`, result);
+    } catch (err) {
+      console.warn("⚠️ persistMonsterPositions failed:", err);
+    }
+  }
 
     /* ============================================================
        🚶 Player Movement (Authoritative, Map-Safe)
@@ -200,16 +287,16 @@ this.onMessage("attack_monster", async (client, msg) => {
 
     monster.hp = Math.max(0, monster.hp - totalDamage);
 
-    // 🩸 Broadcast damage to everyone on same map
-    this.safeBroadcastToMap(player.mapId, "monster_damaged", {
-      monsterId: monster.id,
-      hp: monster.hp,
-      maxHP: monster.maxHP,
-      damage: totalDamage,
-      crit,
-      attacker: player.playerName,
-    });
-
+    // 🩸 Broadcast damage to everyone on same map (normalized)
+this.safeBroadcastToMap(player.mapId, "monster_damaged", {
+  monsterId: String(monster.id),
+  newHP: monster.hp,        // ✅ unified field name
+  maxHP: monster.maxHP,
+  damage: totalDamage,
+  crit,
+  attacker: player.playerName,
+  mapId: player.mapId,
+});
     // 💀 Death + Reward
     if (monster.hp <= 0) {
       console.log(`💀 Monster ${monster.id} killed by ${player.playerName}`);
@@ -416,86 +503,105 @@ this.onMessage("attack_monster", async (client, msg) => {
   }
 
   /* ============================================================
-     🧟 Monster Logic
+     🧟 Monster Logic (Updated for Persistent + Realtime Sync)
    ============================================================ */
-  spawnMonsters() {
-    // 🧹 Clear any old monsters before spawning
-    this.state.monsters = {};
+spawnMonsters() {
+  // 🧹 Clear any old monsters before spawning
+  this.state.monsters = {};
 
-    // 🧩 Spawn all monsters from template
-    for (const t of this.monsterTemplates) {
-      this.state.monsters[t.id] = { ...t };
-    }
+  // 🧩 Spawn all monsters from template with normalized IDs
+  for (const t of this.monsterTemplates) {
+    const id = String(t.id); // 🔥 always string for lookup consistency
+    this.state.monsters[id] = { ...t, id };
+  }
 
-    console.log(`🧟 Spawned ${Object.keys(this.state.monsters).length} monsters`);
+  const total = Object.keys(this.state.monsters).length;
+  console.log(`🧟 Spawned ${total} monsters across all maps`);
 
-    // 🧠 Group monsters by map for initial broadcast
+  // 🧠 Group monsters by map for initial broadcast
+  const monstersByMap = {};
+  for (const m of Object.values(this.state.monsters)) {
+    if (!monstersByMap[m.mapId]) monstersByMap[m.mapId] = [];
+    monstersByMap[m.mapId].push(m);
+  }
+
+  // ✅ Send initial monster list to players on same map
+  for (const [mapId, list] of Object.entries(monstersByMap)) {
+    this.safeBroadcastToMap(Number(mapId), "monsters_update", list);
+  }
+
+  // 💾 Save initial monster positions for persistence
+  this.persistMonsterPositions();
+}
+
+updateMonsterMovement() {
+  try {
+    // ✅ Step 1: Group monsters by map
     const monstersByMap = {};
+
     for (const m of Object.values(this.state.monsters)) {
+      if (m.hp <= 0) continue; // skip dead monsters
+
+      // 🎲 Random movement pattern
+      if (Math.random() < 0.5) {
+        m.dir = Math.random() < 0.5 ? "left" : "right";
+        m.state = "walk";
+        m.x += m.dir === "left" ? -30 : 30;
+
+        // 🔒 Clamp boundaries (optional: prevent leaving map)
+        if (m.x < 0) m.x = 0;
+        if (m.x > 2000) m.x = 2000; // adjust map width as needed
+      } else {
+        m.state = "idle";
+      }
+
+      // Group by map for efficient broadcast
       if (!monstersByMap[m.mapId]) monstersByMap[m.mapId] = [];
-      monstersByMap[m.mapId].push(m);
+      monstersByMap[m.mapId].push({
+        id: String(m.id),
+        x: m.x,
+        y: m.y,
+        dir: m.dir,
+        state: m.state,
+        hp: m.hp,
+        mapId: m.mapId,
+      });
     }
 
-    // ✅ Send initial monster list to players on same map
+    // ✅ Step 2: Broadcast movement updates to each map
     for (const [mapId, list] of Object.entries(monstersByMap)) {
       this.safeBroadcastToMap(Number(mapId), "monsters_update", list);
     }
-  }
 
-  updateMonsterMovement() {
-    try {
-      // ✅ Step 1: Group monsters by map
-      const monstersByMap = {};
-
-      for (const m of Object.values(this.state.monsters)) {
-        if (m.hp <= 0) continue;
-
-        // 🎲 Random movement pattern
-        if (Math.random() < 0.5) {
-          m.dir = Math.random() < 0.5 ? "left" : "right";
-          m.state = "walk";
-          m.x += m.dir === "left" ? -30 : 30;
-        } else {
-          m.state = "idle";
-        }
-
-        // Add monster to its map group
-        if (!monstersByMap[m.mapId]) monstersByMap[m.mapId] = [];
-        monstersByMap[m.mapId].push({
-          id: m.id,
-          x: m.x,
-          y: m.y,
-          dir: m.dir,
-          state: m.state,
-          hp: m.hp,
-          mapId: m.mapId,
-        });
-      }
-
-      // ✅ Step 2: Broadcast to players only on same map
-      for (const [mapId, list] of Object.entries(monstersByMap)) {
-        this.safeBroadcastToMap(Number(mapId), "monsters_update", list);
-      }
-    } catch (err) {
-      console.error("⚠️ updateMonsterMovement failed:", err);
+    // 💾 Occasionally persist positions to external DB/Sheet
+    if (Math.random() < 0.2) { // only 20% of ticks to reduce API calls
+      this.persistMonsterPositions();
     }
+  } catch (err) {
+    console.error("⚠️ updateMonsterMovement failed:", err);
   }
+}
 
-  respawnMonster(monster) {
-    monster.hp = monster.maxHP;
-    monster.x += Math.random() * 100 - 50;
-    monster.y += Math.random() * 60 - 30;
-    monster.state = "idle";
+respawnMonster(monster) {
+  monster.hp = monster.maxHP;
+  monster.x += Math.random() * 100 - 50;
+  monster.y += Math.random() * 60 - 30;
+  monster.state = "idle";
+  monster.dir = Math.random() < 0.5 ? "left" : "right";
 
-    // ✅ Broadcast respawn only to players in the same map
-    this.safeBroadcastToMap(monster.mapId, "monster_respawn", {
-      id: monster.id,
-      x: monster.x,
-      y: monster.y,
-      hp: monster.hp,
-      mapId: monster.mapId,
-    });
-  }
+  // ✅ Broadcast respawn to players on the same map
+  this.safeBroadcastToMap(monster.mapId, "monster_respawn", {
+    id: String(monster.id),
+    x: monster.x,
+    y: monster.y,
+    hp: monster.hp,
+    mapId: monster.mapId,
+  });
+
+  // 💾 Persist new monster state
+  this.persistMonsterPositions();
+}
+
 
 
   /* ============================================================
@@ -524,11 +630,12 @@ this.onMessage("attack_monster", async (client, msg) => {
     }
   }
 
-  /* ============================================================
-     🧹 Room Disposal
+    /* ============================================================
+     🧹 Room Disposal (Final Save)
      ============================================================ */
   onDispose() {
-    console.log("🧹 MMORPGRoom disposed.");
+    console.log("🧹 MMORPGRoom disposed — saving final monster positions...");
+    this.persistMonsterPositions();
   }
 }
 
