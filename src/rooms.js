@@ -523,6 +523,13 @@ this.clock.setInterval(() => {
   try {
     if (!monster) return;
 
+    // 🧱 Guard: no clients → skip broadcast to avoid disconnection errors
+    if (!this.clients || this.clients.length === 0) {
+      console.warn(`⚠️ Skipping respawn for ${monster.id} — no connected clients.`);
+      return;
+    }
+
+    // ♻️ Reset monster data safely
     monster.hp = monster.maxHP;
     monster.x += Math.random() * 100 - 50;
     monster.y += Math.random() * 60 - 30;
@@ -540,8 +547,12 @@ this.clock.setInterval(() => {
       state: monster.state,
     };
 
+    // 📡 Safe broadcast only if connected
     this.safeBroadcastToMap(monster.mapId, "monster_respawn", respawnData);
+
+    // 💾 Persist updated position
     this.persistMonsterPositions();
+
     console.log(`🔄 Monster ${monster.id} respawned on map ${monster.mapId}`);
   } catch (err) {
     console.warn("⚠️ respawnMonster failed:", err);
@@ -549,27 +560,30 @@ this.clock.setInterval(() => {
 }
 
 
+// ============================================================
+// 📡 Safe Broadcast Utilities (Crash-proof version)
+// ============================================================
+safeBroadcastToMap(mapId, event, data) {
+  if (!this.clients || this.clients.length === 0) return; // nothing to send to
 
-  // ============================================================
-  // 📡 Safe Broadcast Utilities
-  // ============================================================
-  safeBroadcastToMap(mapId, event, data) {
   for (const c of this.clients) {
     try {
       const p = this.state.players[c.sessionId];
       if (!p || Number(p.mapId) !== Number(mapId)) continue;
 
-      // avoid sending to closed sockets (ws OPEN === 1)
-      if (c.connection && typeof c.connection.readyState !== "undefined") {
-        if (c.connection.readyState !== 1) continue;
-      }
+      const ws = c.connection;
+      if (!ws || ws.readyState !== 1) continue; // 1 = OPEN
 
       c.send(event, data);
     } catch (err) {
-      console.warn(`⚠️ Failed to send ${event} to ${c.sessionId}:`, err);
+      // 🧩 Silent skip to avoid "code 1005" abnormal closure
+      console.warn(`⚠️ Broadcast to ${c.sessionId} failed (${event}):`, err.message);
+      continue;
     }
   }
 }
+
+
 
 
 
