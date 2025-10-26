@@ -224,27 +224,26 @@ this.onMessage("attack_monster", async (client, msg) => {
     });
 
     // 🧩 Save monster spawn template for clean respawn
-    this._monsterSpawnTemplates = this._monsterSpawnTemplates || {};
-    this._monsterSpawnTemplates[monster.id] = {
-      ...monster,
-      spawnX: monster.spawnX ?? monster.x,
-      spawnY: monster.spawnY ?? monster.y,
-      maxHP: monster.maxHP || 100,
-      mapId: monster.mapId,
-    };
+this._monsterSpawnTemplates = this._monsterSpawnTemplates || {};
+this._monsterSpawnTemplates[monster.id] = {
+  ...monster,
+  spawnX: monster.spawnX ?? monster.x,
+  spawnY: monster.spawnY ?? monster.y,
+  maxHP: monster.maxHP || 100,
+  mapId: monster.mapId, // ✅ make sure the map is preserved
+};
 
-    // 🕒 Schedule respawn safely (by ID, not by object reference)
-    console.log(`🕒 Respawning ${monster.name} (${monster.id}) in 5 seconds...`);
-    const monsterId = monster.id;
-    this.clock.setTimeout(() => {
-      if (this.respawnMonsterById) {
-        this.respawnMonsterById(monsterId);
-      } else {
-        console.error("❌ respawnMonsterById not defined!");
-      }
-    }, 5000);
+// 🕒 Schedule respawn safely
+console.log(`🕒 Respawning ${monster.name} (${monster.id}) in 5 seconds...`);
+const monsterId = monster.id;
+this.clock.setTimeout(() => {
+  if (this.respawnMonsterById) {
+    this.respawnMonsterById(monsterId);
+  } else {
+    console.error("❌ respawnMonsterById not defined!");
   }
-});
+}, 5000);
+
 
 
 
@@ -463,59 +462,55 @@ this.onMessage("attack_monster", async (client, msg) => {
      ♻️ Safe Monster Respawn (Fixed)
      ============================================================ */
   respawnMonsterById(monsterId) {
-    if (!monsterId) return;
+  if (!monsterId) return;
 
-    // ✅ Find base template
-    const tpl =
-      this._monsterSpawnTemplates?.[monsterId] ||
-      this.monsterTemplates.find((t) => String(t.id) === String(monsterId));
+  const tpl =
+    this._monsterSpawnTemplates?.[monsterId] ||
+    this.monsterTemplates.find((t) => String(t.id) === String(monsterId));
 
-    if (!tpl) {
-      console.warn(`❌ No template found for respawn ${monsterId}`);
-      return;
-    }
-
-    // ✅ Recreate clean monster
-    const newMonster = {
-      id: tpl.id,
-      name: tpl.name,
-      level: tpl.level || 1,
-      maxHP: Number(tpl.maxHP) || 100,
-      hp: Number(tpl.maxHP) || 100,
-      attack: tpl.attack || 10,
-      defense: tpl.defense || 5,
-      mapId: Number(tpl.mapId) || 101,
-      x: Number(tpl.spawnX) || Number(tpl.x) || 400,
-      y: Number(tpl.spawnY) || Number(tpl.y) || 300,
-      sprites: tpl.sprites || {},
-      state: "idle",
-      dir: "left",
-      spawnX: tpl.spawnX ?? tpl.x,
-      spawnY: tpl.spawnY ?? tpl.y,
-    };
-
-    // ✅ Replace old entry (ensures Colyseus state reactivity)
-    this.state.monsters[newMonster.id] = newMonster;
-
-    const respawnData = {
-      id: newMonster.id,
-      monsterId: newMonster.id,
-      name: newMonster.name,
-      mapId: newMonster.mapId,
-      x: newMonster.x,
-      y: newMonster.y,
-      hp: newMonster.hp,
-      maxHP: newMonster.maxHP,
-      sprites: newMonster.sprites,
-    };
-
-    try {
-      this.safeBroadcastToMap(newMonster.mapId, "monster_respawn", respawnData);
-      console.log(`✅ Respawned ${newMonster.name} (${newMonster.id}) on map ${newMonster.mapId}`);
-    } catch (err) {
-      console.error(`❌ Failed to broadcast monster_respawn for ${newMonster.id}:`, err);
-    }
+  if (!tpl) {
+    console.warn(`❌ No template found for respawn ${monsterId}`);
+    return;
   }
+
+  // ✅ Create a clean monster copy using saved spawn data
+  const newMonster = {
+    id: tpl.id,
+    name: tpl.name,
+    level: tpl.level || 1,
+    maxHP: Number(tpl.maxHP) || 100,
+    hp: Number(tpl.maxHP) || 100,
+    attack: tpl.attack || 10,
+    defense: tpl.defense || 5,
+    mapId: Number(tpl.mapId) || 101, // ✅ Keep same map
+    x: Number(tpl.spawnX) || Number(tpl.x) || 400,
+    y: Number(tpl.spawnY) || Number(tpl.y) || 300,
+    sprites: tpl.sprites || {},
+    state: "idle",
+    dir: "left",
+    spawnX: tpl.spawnX ?? tpl.x,
+    spawnY: tpl.spawnY ?? tpl.y,
+  };
+
+  // ✅ Replace old monster entry
+  this.state.monsters[newMonster.id] = newMonster;
+
+  // ✅ Inform all players in same map
+  const respawnData = {
+    monsterId: newMonster.id,
+    name: newMonster.name,
+    mapId: newMonster.mapId,
+    x: newMonster.x,
+    y: newMonster.y,
+    hp: newMonster.hp,
+    maxHP: newMonster.maxHP,
+    sprites: newMonster.sprites,
+  };
+
+  this.safeBroadcastToMap(newMonster.mapId, "monster_respawn", respawnData);
+  console.log(`✅ Respawned ${newMonster.name} (${newMonster.id}) on map ${newMonster.mapId}`);
+}
+
 
 
 
