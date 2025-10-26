@@ -399,17 +399,19 @@ class MMORPGRoom extends Room {
 
   respawnMonster(monster) {
   try {
-    const id = monster.id;
-    if (!id) return;
+    if (!monster || !monster.id) {
+      console.warn("⚠️ respawnMonster: missing monster or ID:", monster);
+      return;
+    }
 
-    // Get the template from the original list
+    const id = monster.id;
     const template = this.monsterTemplates.find((m) => m.id === id);
+
     if (!template) {
       console.warn(`⚠️ No template found for monster ${id}`);
       return;
     }
 
-    // Rebuild full monster data safely
     const newMonster = {
       ...template,
       hp: template.maxHP,
@@ -419,11 +421,9 @@ class MMORPGRoom extends Room {
       y: template.y + (Math.random() * 60 - 30),
     };
 
-    // Update the live state
     this.state.monsters[id] = newMonster;
 
-    // ✅ Broadcast full monster data to everyone on that map
-    this.safeBroadcastToMap(newMonster.mapId, "monster_respawn", {
+    const payload = {
       id: newMonster.id,
       name: newMonster.name,
       mapId: newMonster.mapId,
@@ -432,14 +432,21 @@ class MMORPGRoom extends Room {
       hp: newMonster.hp,
       maxHP: newMonster.maxHP,
       sprites: newMonster.sprites,
-      baseData: newMonster, // client will use this to rebuild the DOM element
-    });
+      baseData: newMonster,
+    };
 
-    console.log(`🔄 Monster ${id} respawned at (${newMonster.x}, ${newMonster.y})`);
+    // ✅ Send to players on same map
+    this.safeBroadcastToMap(newMonster.mapId, "monster_respawn", payload);
+
+    // ✅ Fallback (in case mapId mismatch)
+    this.safeBroadcast("monster_respawn", payload);
+
+    console.log(`🔄 Monster ${id} respawned at (${newMonster.x.toFixed(1)}, ${newMonster.y.toFixed(1)}) on map ${newMonster.mapId}`);
   } catch (err) {
     console.warn("⚠️ respawnMonster failed:", err);
   }
 }
+
 
 
 
