@@ -405,47 +405,53 @@ class MMORPGRoom extends Room {
     }
 
     const id = String(monster.id);
+
+    // ✅ FIX #1 — Use the normalized field “id” for lookup (MonsterID no longer exists)
     const template =
-      this.monsterTemplates.find((m) => String(m.MonsterID || m.id) === id) ||
-      monster;
+      this.monsterTemplates.find((m) => String(m.id) === id) || monster;
 
     if (!template) {
       console.warn(`⚠️ No template found for monster ${id}`);
       return;
     }
 
-    // ✅ Always read mapId dynamically (never hardcode)
-    const mapId = Number(template.MapID || template.mapId || monster.mapId);
-    if (!mapId) {
-      console.warn(`⚠️ Missing mapId for monster ${id}`);
+    // ✅ FIX #2 — Ensure mapId always exists (read from template or fallback to monster)
+    const mapId = Number(template.mapId || template.MapID || monster.mapId);
+    if (!mapId || isNaN(mapId)) {
+      console.warn(`⚠️ Missing valid mapId for monster ${id}`);
       return;
     }
+
+    // ✅ FIX #3 — Safe coordinate randomization (respawn near old location or default)
+    const baseX = Number(template.PositionX || monster.x || 400);
+    const baseY = Number(template.PositionY || monster.y || 300);
 
     const newMonster = {
       ...template,
       id,
       mapId,
-      Name: template.Name || "Monster",
-      hp: Number(template.BaseHP || monster.maxHP || 100),
-      maxHP: Number(template.BaseHP || monster.maxHP || 100),
+      Name: template.Name || monster.Name || `Monster ${id}`,
+      hp: Number(template.BaseHP || template.maxHP || monster.maxHP || 100),
+      maxHP: Number(template.BaseHP || template.maxHP || monster.maxHP || 100),
       state: "idle",
-      x: Number(template.PositionX || monster.x || 400) + (Math.random() * 40 - 20),
-      y: Number(template.PositionY || monster.y || 300) + (Math.random() * 20 - 10),
+      x: baseX + (Math.random() * 40 - 20),
+      y: baseY + (Math.random() * 20 - 10),
       sprites: {
-        IdleLeft: template.ImageURL_IdleLeft,
-        IdleRight: template.ImageURL_IdleRight,
-        WalkLeft: template.ImageURL_Walk_Left,
-        WalkRight: template.ImageURL_Walk_Right,
-        AttackLeft: template.ImageURL_Attack_Left,
-        AttackRight: template.ImageURL_Attack_Right,
-        DieLeft: template.ImageURL_Die_Left,
-        DieRight: template.ImageURL_Die_Right,
+        IdleLeft: template.ImageURL_IdleLeft || template.IdleLeft,
+        IdleRight: template.ImageURL_IdleRight || template.IdleRight,
+        WalkLeft: template.ImageURL_Walk_Left || template.WalkLeft,
+        WalkRight: template.ImageURL_Walk_Right || template.WalkRight,
+        AttackLeft: template.ImageURL_Attack_Left || template.AttackLeft,
+        AttackRight: template.ImageURL_Attack_Right || template.AttackRight,
+        DieLeft: template.ImageURL_Die_Left || template.DieLeft,
+        DieRight: template.ImageURL_Die_Right || template.DieRight,
       },
     };
 
-    // ✅ Save monster in memory (server state)
+    // ✅ FIX #4 — Save to in-memory server state
     this.state.monsters[id] = newMonster;
 
+    // ✅ FIX #5 — Build clean payload for broadcast
     const payload = {
       id,
       name: newMonster.Name,
@@ -458,9 +464,10 @@ class MMORPGRoom extends Room {
       baseData: newMonster,
     };
 
-    // ✅ Broadcast to all players in that map only
+    // ✅ FIX #6 — Broadcast only to players in same map
     this.safeBroadcastToMap(mapId, "monster_respawn", payload);
 
+    // ✅ FIX #7 — Log success for debugging
     console.log(
       `🔄 [Respawned] ${id} (${newMonster.Name}) on map ${mapId} at (${newMonster.x.toFixed(
         1
@@ -470,6 +477,7 @@ class MMORPGRoom extends Room {
     console.error("❌ respawnMonster failed:", err);
   }
 }
+
 
 
 
