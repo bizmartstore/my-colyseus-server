@@ -150,10 +150,47 @@ class MMORPGRoom extends Room {
     this.clock.setInterval(() => this.updateMonsterMovement(), 2000);
 
     /* ============================================================
+       💓 Server Heartbeat (prevents code 1005)
+       ============================================================ */
+    this.clock.setInterval(() => {
+      for (const client of this.clients) {
+        try {
+          client.send("ping", { t: Date.now() });
+        } catch (_) {}
+      }
+    }, 10000);
+
+    /* ============================================================
        🕐 Keep-alive Ping Handler
        ============================================================ */
     this.onMessage("ping", (client) => {
-      client.send("pong", { ok: true, t: Date.now() });
+      try {
+        client.send("pong", { ok: true, t: Date.now() });
+      } catch (_) {}
+    });
+
+    /* ============================================================
+       🧟 Handle Monster Respawn from Host
+       ============================================================ */
+    this.onMessage("monster_respawn", (client, msg) => {
+      const { monsterId, data, x, y, hp, mapId } = msg || {};
+      if (!monsterId || !data) return;
+
+      const existing = this.state.monsters[monsterId];
+      if (existing) {
+        Object.assign(existing, data, { x, y, hp });
+      } else {
+        this.state.monsters[monsterId] = { ...data, x, y, hp };
+      }
+
+      console.log(`🔄 [Server] Monster ${monsterId} respawned on map ${mapId}`);
+      this.safeBroadcastToMap(mapId, "monster_respawn", {
+        id: monsterId,
+        x,
+        y,
+        hp,
+        name: data.name || "Monster",
+      });
     });
 
     /* ============================================================
@@ -162,21 +199,18 @@ class MMORPGRoom extends Room {
     this.onMessage("move", (client, msg) => {
       const p = this.state.players[client.sessionId];
       if (!p) return;
-
       p.x = msg.x;
       p.y = msg.y;
       p.dir = msg.dir;
 
-      const payload = {
+      this.safeBroadcastToMap(p.mapId, "player_move", {
         id: client.sessionId,
         x: p.x,
         y: p.y,
         dir: p.dir,
         mapId: p.mapId,
         playerName: p.playerName,
-      };
-
-      this.safeBroadcastToMap(p.mapId, "player_move", payload);
+      });
     });
 
     /* ============================================================
@@ -218,14 +252,11 @@ class MMORPGRoom extends Room {
     this.onMessage("attack", (client, message) => {
       const player = this.state.players[client.sessionId];
       if (!player) return;
-
-      const payload = {
+      this.safeBroadcastToMap(player.mapId, "attack", {
         sessionId: client.sessionId,
         mapId: player.mapId,
         ...message,
-      };
-
-      this.safeBroadcastToMap(player.mapId, "attack", payload);
+      });
     });
 
     /* ============================================================
@@ -234,7 +265,6 @@ class MMORPGRoom extends Room {
     this.onMessage("chat", (client, message) => {
       const player = this.state.players[client.sessionId];
       if (!player || !message.text) return;
-
       const chatPayload = {
         sender: player.email,
         name: player.playerName,
@@ -242,7 +272,6 @@ class MMORPGRoom extends Room {
         mapId: player.mapId,
         ts: Date.now(),
       };
-
       console.log(`💬 [CHAT] ${player.playerName}@Map${player.mapId}: ${chatPayload.text}`);
       this.safeBroadcastToMap(player.mapId, "chat", chatPayload);
     });
@@ -253,7 +282,6 @@ class MMORPGRoom extends Room {
     this.onMessage("change_map", (client, message) => {
       const player = this.state.players[client.sessionId];
       if (!player) return;
-
       const oldMap = player.mapId;
       const newMap = Number(message.newMapId) || oldMap;
       if (newMap === oldMap) return;
@@ -261,20 +289,12 @@ class MMORPGRoom extends Room {
       console.log(`🌍 ${player.playerName} moved from Map ${oldMap} → ${newMap}`);
       player.mapId = newMap;
 
-      // Remove from old map
       this.safeBroadcastToMap(oldMap, "player_left", { id: client.sessionId });
+      this.safeBroadcastToMap(newMap, "player_joined", { id: client.sessionId, player });
 
-      // Add to new map
-      this.safeBroadcastToMap(newMap, "player_joined", {
-        id: client.sessionId,
-        player,
-      });
-
-      // Send fresh snapshot
       const sameMapPlayers = {};
-      for (const [id, p] of Object.entries(this.state.players)) {
+      for (const [id, p] of Object.entries(this.state.players))
         if (p.mapId === newMap) sameMapPlayers[id] = p;
-      }
       client.send("players_snapshot", sameMapPlayers);
     });
 
@@ -284,11 +304,9 @@ class MMORPGRoom extends Room {
     this.onMessage("request_players", (client) => {
       const requester = this.state.players[client.sessionId];
       if (!requester) return;
-
       const sameMapPlayers = {};
-      for (const [id, p] of Object.entries(this.state.players)) {
+      for (const [id, p] of Object.entries(this.state.players))
         if (p.mapId === requester.mapId) sameMapPlayers[id] = p;
-      }
       client.send("players_snapshot", sameMapPlayers);
     });
   }
@@ -298,7 +316,6 @@ class MMORPGRoom extends Room {
      ============================================================ */
   onJoin(client, options) {
     console.log("✨ Player joined:", client.sessionId, options);
-
     const safeEmail = options.email || `guest_${Math.random().toString(36).substring(2, 8)}@game.local`;
     const safeName = options.playerName || "Guest";
     const safeCharacterID = options.CharacterID || "C001";
@@ -326,8 +343,6 @@ class MMORPGRoom extends Room {
       exp: 0,
       coins: 0,
       sprites: {
-        idleFront: charData.ImageURL_IdleFront,
-        idleBack: charData.ImageURL_IdleBack,
         walkLeft: charData.ImageURL_Walk_Left,
         walkRight: charData.ImageURL_Walk_Right,
         attackLeft: charData.ImageURL_Attack_Left,
@@ -337,14 +352,11 @@ class MMORPGRoom extends Room {
 
     console.log(`✅ ${safeName} (${safeEmail}) joined Map ${mapId} as ${charData.Class}`);
 
-    // Send snapshot of players in same map
     const sameMapPlayers = {};
-    for (const [id, other] of Object.entries(this.state.players)) {
+    for (const [id, other] of Object.entries(this.state.players))
       if (other.mapId === mapId) sameMapPlayers[id] = other;
-    }
     client.send("players_snapshot", sameMapPlayers);
 
-    // Notify others
     this.safeBroadcastToMap(mapId, "player_joined", {
       id: client.sessionId,
       player: this.state.players[client.sessionId],
@@ -357,7 +369,6 @@ class MMORPGRoom extends Room {
   onLeave(client) {
     const player = this.state.players[client.sessionId];
     if (!player) return;
-
     console.log(`👋 Player left: ${player.playerName} (${client.sessionId})`);
     this.safeBroadcastToMap(player.mapId, "player_left", { id: client.sessionId });
     delete this.state.players[client.sessionId];
@@ -373,6 +384,7 @@ class MMORPGRoom extends Room {
 
   updateMonsterMovement() {
     try {
+      if (this.clients.length === 0) return; // skip when empty room
       const lightMonsters = [];
       for (const m of Object.values(this.state.monsters)) {
         if (m.hp <= 0) continue;
@@ -398,10 +410,16 @@ class MMORPGRoom extends Room {
   }
 
   respawnMonster(monster) {
+    if (!monster || !this.state.monsters[monster.id]) return;
     monster.hp = monster.maxHP;
     monster.x += Math.random() * 100 - 50;
     monster.y += Math.random() * 60 - 30;
     monster.state = "idle";
+
+    // skip broadcast if no players on that map
+    const mapPlayers = Object.values(this.state.players).filter(p => p.mapId === monster.mapId);
+    if (mapPlayers.length === 0) return;
+
     this.safeBroadcastToMap(monster.mapId, "monster_respawn", {
       id: monster.id,
       x: monster.x,
@@ -416,7 +434,7 @@ class MMORPGRoom extends Room {
   safeBroadcastToMap(mapId, event, data) {
     for (const c of this.clients) {
       const p = this.state.players[c.sessionId];
-      if (p?.mapId === mapId) {
+      if (p?.mapId === mapId && c?.connection?.isOpen) {
         try {
           c.send(event, data);
         } catch (err) {
@@ -428,6 +446,7 @@ class MMORPGRoom extends Room {
 
   safeBroadcast(event, data) {
     for (const c of this.clients) {
+      if (!c?.connection?.isOpen) continue;
       try {
         c.send(event, data);
       } catch (err) {
