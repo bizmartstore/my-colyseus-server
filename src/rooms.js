@@ -180,37 +180,57 @@ class MMORPGRoom extends Room {
     });
 
     /* ============================================================
-       ⚔️ Player Attack (vs Monsters)
-       ============================================================ */
-    this.onMessage("attack_monster", async (client, msg) => {
-      const player = this.state.players?.[client.sessionId];
-      const monster = this.state.monsters?.[msg.monsterId];
-      if (!player || !monster || monster.hp <= 0) return;
+   ⚔️ Player Attack (vs Monsters) — FINAL FIXED
+   ============================================================ */
+this.onMessage("attack_monster", async (client, msg) => {
+  const player = this.state.players?.[client.sessionId];
+  const monster = this.state.monsters?.[msg.monsterId];
 
-      const baseDamage = Math.max(1, (player.attack || 1) - (monster.defense || 0));
-      const crit = Math.random() < 0.1;
-      const totalDamage = Math.floor(baseDamage * (crit ? 1.5 : 1));
-      monster.hp = Math.max(0, monster.hp - totalDamage);
+  if (!player || !monster) return;
+  if (monster.hp <= 0 || monster.state === "dead") return;
 
-      this.safeBroadcastToMap(player.mapId, "monster_hit", {
-        monsterId: monster.id,
-        hp: monster.hp,
-        damage: totalDamage,
-        crit,
-        attacker: player.playerName,
-      });
+  // ✅ Calculate damage
+  const baseDamage = Math.max(1, (player.attack || 1) - (monster.defense || 0));
+  const crit = Math.random() < (player.critChance || 0.1);
+  const totalDamage = Math.floor(baseDamage * (crit ? 1.5 : 1));
 
-      if (monster.hp <= 0) {
-        this.safeBroadcastToMap(player.mapId, "monster_dead", {
-          monsterId: monster.id,
-          coins: monster.coins,
-          exp: monster.exp,
-        });
-        player.exp = (player.exp || 0) + monster.exp;
-        player.coins = (player.coins || 0) + monster.coins;
-        this.clock.setTimeout(() => this.respawnMonster(monster), 5000);
-      }
+  // ✅ Apply damage
+  monster.hp = Math.max(0, monster.hp - totalDamage);
+
+  // ✅ Broadcast hit to players on same map
+  this.safeBroadcastToMap(player.mapId, "monster_hit", {
+    monsterId: monster.id,
+    hp: monster.hp,
+    damage: totalDamage,
+    crit,
+    attacker: player.playerName,
+  });
+
+  // ✅ Monster death check
+  if (monster.hp <= 0) {
+    monster.state = "dead";
+
+    console.log(`💀 ${monster.name} (${monster.id}) killed by ${player.playerName}`);
+
+    // ✅ Reward player
+    player.exp = (player.exp || 0) + (monster.exp || 0);
+    player.coins = (player.coins || 0) + (monster.coins || 0);
+
+    // ✅ Notify clients of death
+    this.safeBroadcastToMap(player.mapId, "monster_dead", {
+      monsterId: monster.id,
+      coins: monster.coins,
+      exp: monster.exp,
     });
+
+    // ✅ Log and schedule respawn
+    console.log(`🕒 Respawning ${monster.name} (${monster.id}) in 5 seconds...`);
+    this.clock.setTimeout(() => {
+      this.respawnMonster(monster);
+    }, 5000);
+  }
+});
+
 
     /* ============================================================
        ⚔️ Player Attack (vs Players)
@@ -364,10 +384,17 @@ class MMORPGRoom extends Room {
   }
 
   /* ============================================================
-     🧟 Monster Logic
+     🧟 Monster Logic (Fully Fixed)
      ============================================================ */
   spawnMonsters() {
-    this.monsterTemplates.forEach((t) => (this.state.monsters[t.id] = { ...t }));
+    // ✅ Spawn and remember original positions for clean respawn
+    this.monsterTemplates.forEach((t) => {
+      this.state.monsters[t.id] = {
+        ...t,
+        spawnX: t.x, // Save original position for consistent respawn
+        spawnY: t.y,
+      };
+    });
     console.log(`🧟 Spawned ${Object.keys(this.state.monsters).length} monsters`);
   }
 
@@ -380,7 +407,10 @@ class MMORPGRoom extends Room {
           m.dir = Math.random() < 0.5 ? "left" : "right";
           m.state = "walk";
           m.x += m.dir === "left" ? -30 : 30;
-        } else m.state = "idle";
+        } else {
+          m.state = "idle";
+        }
+
         lightMonsters.push({
           id: m.id,
           x: m.x,
@@ -391,6 +421,7 @@ class MMORPGRoom extends Room {
           mapId: m.mapId,
         });
       }
+
       this.safeBroadcast("monsters_update", lightMonsters);
     } catch (err) {
       console.error("⚠️ updateMonsterMovement failed:", err);
@@ -398,29 +429,51 @@ class MMORPGRoom extends Room {
   }
 
   respawnMonster(monster) {
-  // Reset base data
-  monster.hp = monster.maxHP;
-  monster.state = "idle";
+    if (!monster) return;
 
-  // Keep its original position from the sheet (no random offsets)
-  // and original map assignment
-  const respawnData = {
-    id: monster.id,
-    monsterId: monster.id,
-    name: monster.name,
-    class: monster.class,
-    level: monster.level,
-    mapId: monster.mapId,
-    x: monster.x,          // ← from Sheets
-    y: monster.y,          // ← from Sheets
-    hp: monster.hp,
-    maxHP: monster.maxHP,
-    sprites: monster.sprites,
-    baseData: monster,     // includes everything like image URLs
-  };
+    console.log(`🩺 Respawning monster ${monster.id} (${monster.name}) on map ${monster.mapId}`);
 
-  this.safeBroadcastToMap(monster.mapId, "monster_respawn", respawnData);
-}
+    // ✅ Restore stats
+    monster.hp = monster.maxHP;
+    monster.state = "idle";
+
+    // ✅ Reset position to original spawn point
+    monster.x = monster.spawnX ?? monster.x;
+    monster.y = monster.spawnY ?? monster.y;
+
+    // ✅ Clean base data for client
+    const baseData = {
+      MonsterID: monster.id,
+      Name: monster.name,
+      MapID: Number(monster.mapId),
+      BaseHP: monster.maxHP,
+      PositionX: monster.spawnX ?? monster.x,
+      PositionY: monster.spawnY ?? monster.y,
+      sprites: monster.sprites,
+    };
+
+    // ✅ Broadcast respawn to all players on same map
+    const respawnData = {
+      id: monster.id,
+      monsterId: monster.id,
+      name: monster.name,
+      mapId: monster.mapId,
+      x: monster.spawnX ?? monster.x,
+      y: monster.spawnY ?? monster.y,
+      hp: monster.hp,
+      maxHP: monster.maxHP,
+      sprites: monster.sprites,
+      baseData,
+    };
+
+    try {
+      this.safeBroadcastToMap(monster.mapId, "monster_respawn", respawnData);
+      console.log(`✅ Broadcasted respawn for ${monster.name} (${monster.id}) on map ${monster.mapId}`);
+    } catch (err) {
+      console.error(`❌ Failed to broadcast monster_respawn for ${monster.id}:`, err);
+    }
+  }
+
 
 
 
