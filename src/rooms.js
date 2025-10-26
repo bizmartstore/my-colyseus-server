@@ -399,35 +399,48 @@ class MMORPGRoom extends Room {
 
   respawnMonster(monster) {
   try {
-    // Find existing monster entry
     const id = monster.id;
-    if (!id || !this.state.monsters[id]) return;
+    if (!id) return;
 
-    // ✅ Create a new copy instead of mutating the old reference
+    // Get the template from the original list
+    const template = this.monsterTemplates.find((m) => m.id === id);
+    if (!template) {
+      console.warn(`⚠️ No template found for monster ${id}`);
+      return;
+    }
+
+    // Rebuild full monster data safely
     const newMonster = {
-      ...this.state.monsters[id],
-      hp: monster.maxHP,
-      x: monster.x + (Math.random() * 100 - 50),
-      y: monster.y + (Math.random() * 60 - 30),
+      ...template,
+      hp: template.maxHP,
+      maxHP: template.maxHP,
       state: "idle",
+      x: template.x + (Math.random() * 100 - 50),
+      y: template.y + (Math.random() * 60 - 30),
     };
 
-    // ✅ Re-assign to state to trigger Colyseus patch correctly
+    // Update the live state
     this.state.monsters[id] = newMonster;
 
-    // ✅ Broadcast to clients on the same map
+    // ✅ Broadcast full monster data to everyone on that map
     this.safeBroadcastToMap(newMonster.mapId, "monster_respawn", {
       id: newMonster.id,
+      name: newMonster.name,
+      mapId: newMonster.mapId,
       x: newMonster.x,
       y: newMonster.y,
       hp: newMonster.hp,
+      maxHP: newMonster.maxHP,
+      sprites: newMonster.sprites,
+      baseData: newMonster, // client will use this to rebuild the DOM element
     });
 
-    console.log(`🔄 Monster ${id} respawned at (${newMonster.x},${newMonster.y})`);
+    console.log(`🔄 Monster ${id} respawned at (${newMonster.x}, ${newMonster.y})`);
   } catch (err) {
     console.warn("⚠️ respawnMonster failed:", err);
   }
 }
+
 
 
   /* ============================================================
