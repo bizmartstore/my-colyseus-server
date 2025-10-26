@@ -398,17 +398,24 @@ class MMORPGRoom extends Room {
   }
 
   respawnMonster(monster) {
-    monster.hp = monster.maxHP;
-    monster.x += Math.random() * 100 - 50;
-    monster.y += Math.random() * 60 - 30;
-    monster.state = "idle";
-    this.safeBroadcastToMap(monster.mapId, "monster_respawn", {
-      id: monster.id,
-      x: monster.x,
-      y: monster.y,
-      hp: monster.hp,
-    });
-  }
+  monster.hp = monster.maxHP;
+  monster.x += Math.random() * 100 - 50;
+  monster.y += Math.random() * 60 - 30;
+  monster.state = "idle";
+  this.safeBroadcastToMap(monster.mapId, "monster_respawn", {
+    id: monster.id,
+    monsterId: monster.id,
+    name: monster.name,
+    mapId: monster.mapId,
+    x: monster.x,
+    y: monster.y,
+    hp: monster.hp,
+    maxHP: monster.maxHP,
+    sprites: monster.sprites,
+    baseData: monster,
+  });
+}
+
 
   /* ============================================================
      📡 Safe Broadcast Utilities
