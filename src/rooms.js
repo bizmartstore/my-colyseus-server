@@ -180,7 +180,7 @@ class MMORPGRoom extends Room {
     });
 
     /* ============================================================
-   ⚔️ Player Attack (vs Monsters) — FINAL FIXED
+   ⚔️ Player Attack (vs Monsters) — FULLY FIXED & SAFE RESPAWN
    ============================================================ */
 this.onMessage("attack_monster", async (client, msg) => {
   const player = this.state.players?.[client.sessionId];
@@ -191,7 +191,7 @@ this.onMessage("attack_monster", async (client, msg) => {
 
   // ✅ Calculate damage
   const baseDamage = Math.max(1, (player.attack || 1) - (monster.defense || 0));
-  const crit = Math.random() < (player.critChance || 0.1);
+  const crit = Math.random() < ((player.critChance ?? 10) / 100);
   const totalDamage = Math.floor(baseDamage * (crit ? 1.5 : 1));
 
   // ✅ Apply damage
@@ -223,13 +223,29 @@ this.onMessage("attack_monster", async (client, msg) => {
       exp: monster.exp,
     });
 
-    // ✅ Log and schedule respawn
+    // 🧩 Save monster spawn template for clean respawn
+    this._monsterSpawnTemplates = this._monsterSpawnTemplates || {};
+    this._monsterSpawnTemplates[monster.id] = {
+      ...monster,
+      spawnX: monster.spawnX ?? monster.x,
+      spawnY: monster.spawnY ?? monster.y,
+      maxHP: monster.maxHP || 100,
+      mapId: monster.mapId,
+    };
+
+    // 🕒 Schedule respawn safely (by ID, not by object reference)
     console.log(`🕒 Respawning ${monster.name} (${monster.id}) in 5 seconds...`);
+    const monsterId = monster.id;
     this.clock.setTimeout(() => {
-      this.respawnMonster(monster);
+      if (this.respawnMonsterById) {
+        this.respawnMonsterById(monsterId);
+      } else {
+        console.error("❌ respawnMonsterById not defined!");
+      }
     }, 5000);
   }
 });
+
 
 
     /* ============================================================
@@ -384,25 +400,39 @@ this.onMessage("attack_monster", async (client, msg) => {
   }
 
   /* ============================================================
-     🧟 Monster Logic (Fully Fixed)
-     ============================================================ */
+   🧟 Monster Logic (Fully Fixed + Safe Respawn)
+   ============================================================ */
   spawnMonsters() {
-    // ✅ Spawn and remember original positions for clean respawn
+    // 🧠 Create spawn template storage
+    this._monsterSpawnTemplates = {};
+
+    // ✅ Spawn monsters and remember original data for respawn
     this.monsterTemplates.forEach((t) => {
-      this.state.monsters[t.id] = {
+      const monster = {
         ...t,
-        spawnX: t.x, // Save original position for consistent respawn
-        spawnY: t.y,
+        spawnX: Number(t.x) || 400,
+        spawnY: Number(t.y) || 300,
+        hp: Number(t.hp || t.maxHP || 100),
+        maxHP: Number(t.maxHP || t.hp || 100),
+        state: "idle",
+        dir: "left",
       };
+
+      this.state.monsters[t.id] = monster;
+      this._monsterSpawnTemplates[t.id] = monster; // Save for clean respawn
     });
+
     console.log(`🧟 Spawned ${Object.keys(this.state.monsters).length} monsters`);
   }
 
   updateMonsterMovement() {
     try {
       const lightMonsters = [];
+
       for (const m of Object.values(this.state.monsters)) {
-        if (m.hp <= 0) continue;
+        if (m.hp <= 0 || m.state === "dead") continue;
+
+        // 50% chance to move or idle
         if (Math.random() < 0.5) {
           m.dir = Math.random() < 0.5 ? "left" : "right";
           m.state = "walk";
@@ -422,62 +452,72 @@ this.onMessage("attack_monster", async (client, msg) => {
         });
       }
 
+      // ✅ Send minimal update packet
       this.safeBroadcast("monsters_update", lightMonsters);
     } catch (err) {
       console.error("⚠️ updateMonsterMovement failed:", err);
     }
   }
 
-  respawnMonster(monster) {
-  if (!monster) return;
+  /* ============================================================
+     ♻️ Safe Monster Respawn (Fixed)
+     ============================================================ */
+  respawnMonsterById(monsterId) {
+    if (!monsterId) return;
 
-  // Ensure monster exists in state even if filtered or modified
-  if (!this.state.monsters[monster.id]) {
-    this.state.monsters[monster.id] = monster;
+    // ✅ Find base template
+    const tpl =
+      this._monsterSpawnTemplates?.[monsterId] ||
+      this.monsterTemplates.find((t) => String(t.id) === String(monsterId));
+
+    if (!tpl) {
+      console.warn(`❌ No template found for respawn ${monsterId}`);
+      return;
+    }
+
+    // ✅ Recreate clean monster
+    const newMonster = {
+      id: tpl.id,
+      name: tpl.name,
+      level: tpl.level || 1,
+      maxHP: Number(tpl.maxHP) || 100,
+      hp: Number(tpl.maxHP) || 100,
+      attack: tpl.attack || 10,
+      defense: tpl.defense || 5,
+      mapId: Number(tpl.mapId) || 101,
+      x: Number(tpl.spawnX) || Number(tpl.x) || 400,
+      y: Number(tpl.spawnY) || Number(tpl.y) || 300,
+      sprites: tpl.sprites || {},
+      state: "idle",
+      dir: "left",
+      spawnX: tpl.spawnX ?? tpl.x,
+      spawnY: tpl.spawnY ?? tpl.y,
+    };
+
+    // ✅ Replace old entry (ensures Colyseus state reactivity)
+    this.state.monsters[newMonster.id] = newMonster;
+
+    const respawnData = {
+      id: newMonster.id,
+      monsterId: newMonster.id,
+      name: newMonster.name,
+      mapId: newMonster.mapId,
+      x: newMonster.x,
+      y: newMonster.y,
+      hp: newMonster.hp,
+      maxHP: newMonster.maxHP,
+      sprites: newMonster.sprites,
+    };
+
+    try {
+      this.safeBroadcastToMap(newMonster.mapId, "monster_respawn", respawnData);
+      console.log(`✅ Respawned ${newMonster.name} (${newMonster.id}) on map ${newMonster.mapId}`);
+    } catch (err) {
+      console.error(`❌ Failed to broadcast monster_respawn for ${newMonster.id}:`, err);
+    }
   }
 
-  // ✅ Restore stats
-  monster.hp = monster.maxHP;
-  monster.state = "idle";
-  monster.dir = "left";
 
-  // ✅ Reset position safely
-  monster.x = monster.spawnX ?? monster.x ?? 400;
-  monster.y = monster.spawnY ?? monster.y ?? 300;
-
-  // ✅ Mark alive again
-  monster.isDead = false;
-
-  console.log(`🩺 Respawning monster ${monster.name} (${monster.id}) on map ${monster.mapId}`);
-
-  const respawnData = {
-    id: monster.id,
-    monsterId: monster.id,
-    name: monster.name,
-    mapId: Number(monster.mapId) || 101,
-    x: monster.x,
-    y: monster.y,
-    hp: monster.hp,
-    maxHP: monster.maxHP,
-    sprites: monster.sprites,
-    baseData: {
-      MonsterID: monster.id,
-      Name: monster.name,
-      MapID: Number(monster.mapId) || 101,
-      PositionX: monster.x,
-      PositionY: monster.y,
-      BaseHP: monster.maxHP,
-      sprites: monster.sprites,
-    },
-  };
-
-  try {
-    this.safeBroadcastToMap(Number(monster.mapId), "monster_respawn", respawnData);
-    console.log(`✅ Broadcasted respawn for ${monster.name} (${monster.id}) on map ${monster.mapId}`);
-  } catch (err) {
-    console.error(`❌ Failed to broadcast monster_respawn for ${monster.id}:`, err);
-  }
-}
 
 
 
