@@ -398,40 +398,87 @@ class MMORPGRoom extends Room {
   }
 
   respawnMonster(monster) {
-    monster.hp = monster.maxHP;
-    monster.x += Math.random() * 100 - 50;
-    monster.y += Math.random() * 60 - 30;
-    monster.state = "idle";
-    this.safeBroadcastToMap(monster.mapId, "monster_respawn", {
-      id: monster.id,
-      x: monster.x,
-      y: monster.y,
-      hp: monster.hp,
+  try {
+    // Find existing monster entry
+    const id = monster.id;
+    if (!id || !this.state.monsters[id]) return;
+
+    // ✅ Create a new copy instead of mutating the old reference
+    const newMonster = {
+      ...this.state.monsters[id],
+      hp: monster.maxHP,
+      x: monster.x + (Math.random() * 100 - 50),
+      y: monster.y + (Math.random() * 60 - 30),
+      state: "idle",
+    };
+
+    // ✅ Re-assign to state to trigger Colyseus patch correctly
+    this.state.monsters[id] = newMonster;
+
+    // ✅ Broadcast to clients on the same map
+    this.safeBroadcastToMap(newMonster.mapId, "monster_respawn", {
+      id: newMonster.id,
+      x: newMonster.x,
+      y: newMonster.y,
+      hp: newMonster.hp,
     });
+
+    console.log(`🔄 Monster ${id} respawned at (${newMonster.x},${newMonster.y})`);
+  } catch (err) {
+    console.warn("⚠️ respawnMonster failed:", err);
   }
+}
+
 
   /* ============================================================
-     📡 Safe Broadcast Utilities
-     ============================================================ */
+   📡 Safe Broadcast Utilities (Stable + Safe)
+   ============================================================ */
   safeBroadcastToMap(mapId, event, data) {
-    for (const c of this.clients) {
-      const p = this.state.players[c.sessionId];
-      if (p?.mapId === mapId) {
-        try {
-          c.send(event, data);
-        } catch (err) {
-          console.warn(`⚠️ Failed to send ${event} to ${c.sessionId}:`, err);
+    if (!mapId || !event) return;
+    if (data === undefined || data === null) return;
+
+    const jsonData = typeof data === "object" ? { ...data } : data;
+
+    for (const client of this.clients) {
+      try {
+        const player = this.state.players?.[client.sessionId];
+        if (!player || player.mapId !== mapId) continue;
+
+        // Check connection ready state
+        if (
+          !client.connection ||
+          client.connection.readyState !== 1 // WebSocket.OPEN
+        ) {
+          console.warn(`⚠️ Skipping ${event}: client ${client.sessionId} not open`);
+          continue;
         }
+
+        client.send(event, jsonData);
+      } catch (err) {
+        console.warn(`⚠️ Failed to send ${event} to client ${client.sessionId}:`, err);
       }
     }
   }
 
   safeBroadcast(event, data) {
-    for (const c of this.clients) {
+    if (!event) return;
+    if (data === undefined || data === null) return;
+
+    const jsonData = typeof data === "object" ? { ...data } : data;
+
+    for (const client of this.clients) {
       try {
-        c.send(event, data);
+        if (
+          !client.connection ||
+          client.connection.readyState !== 1
+        ) {
+          console.warn(`⚠️ Skipping ${event}: client ${client.sessionId} not open`);
+          continue;
+        }
+
+        client.send(event, jsonData);
       } catch (err) {
-        console.warn(`⚠️ safeBroadcast failed for ${event}:`, err);
+        console.warn(`⚠️ safeBroadcast failed for ${event} to ${client.sessionId}:`, err);
       }
     }
   }
