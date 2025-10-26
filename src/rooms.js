@@ -152,13 +152,14 @@ class MMORPGRoom extends Room {
     /* ============================================================
        💓 Server Heartbeat (prevents code 1005)
        ============================================================ */
-    this.clock.setInterval(() => {
-      for (const client of this.clients) {
-        try {
-          client.send("ping", { t: Date.now() });
-        } catch (_) {}
-      }
-    }, 10000);
+   this.clock.setInterval(() => {
+  for (const client of this.clients) {
+    try {
+      client.send("server_heartbeat", { t: Date.now() });
+    } catch (_) {}
+  }
+}, 10000);
+
 
     /* ============================================================
        🕐 Keep-alive Ping Handler
@@ -432,28 +433,18 @@ class MMORPGRoom extends Room {
      📡 Safe Broadcast Utilities
      ============================================================ */
   safeBroadcastToMap(mapId, event, data) {
-    for (const c of this.clients) {
-      const p = this.state.players[c.sessionId];
-      if (p?.mapId === mapId && c?.connection?.isOpen) {
-        try {
-          c.send(event, data);
-        } catch (err) {
-          console.warn(`⚠️ Failed to send ${event} to ${c.sessionId}:`, err);
-        }
-      }
-    }
-  }
-
-  safeBroadcast(event, data) {
-    for (const c of this.clients) {
-      if (!c?.connection?.isOpen) continue;
+  for (const c of this.clients) {
+    const p = this.state.players[c.sessionId];
+    if (p?.mapId === mapId && c?.connection?.isOpen) {
       try {
         c.send(event, data);
       } catch (err) {
-        console.warn(`⚠️ safeBroadcast failed for ${event}:`, err);
+        console.warn(`⚠️ safeBroadcastToMap failed (${event}) for ${c.sessionId}:`, err.message);
+        // Don't let this exception close the connection
       }
     }
   }
+}
 
   /* ============================================================
      🧹 Room Disposal
