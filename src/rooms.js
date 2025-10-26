@@ -209,7 +209,6 @@ this.onMessage("attack_monster", async (client, msg) => {
   // ✅ Monster death check
   if (monster.hp <= 0) {
     monster.state = "dead";
-
     console.log(`💀 ${monster.name} (${monster.id}) killed by ${player.playerName}`);
 
     // ✅ Reward player
@@ -224,25 +223,28 @@ this.onMessage("attack_monster", async (client, msg) => {
     });
 
     // 🧩 Save monster spawn template for clean respawn
-this._monsterSpawnTemplates = this._monsterSpawnTemplates || {};
-this._monsterSpawnTemplates[monster.id] = {
-  ...monster,
-  spawnX: monster.spawnX ?? monster.x,
-  spawnY: monster.spawnY ?? monster.y,
-  maxHP: monster.maxHP || 100,
-  mapId: monster.mapId, // ✅ make sure the map is preserved
-};
+    this._monsterSpawnTemplates = this._monsterSpawnTemplates || {};
+    this._monsterSpawnTemplates[monster.id] = {
+      ...monster,
+      spawnX: monster.spawnX ?? monster.x,
+      spawnY: monster.spawnY ?? monster.y,
+      maxHP: monster.maxHP || 100,
+      mapId: monster.mapId, // ✅ preserve map
+    };
 
-// 🕒 Schedule respawn safely
-console.log(`🕒 Respawning ${monster.name} (${monster.id}) in 5 seconds...`);
-const monsterId = monster.id;
-this.clock.setTimeout(() => {
-  if (this.respawnMonsterById) {
-    this.respawnMonsterById(monsterId);
-  } else {
-    console.error("❌ respawnMonsterById not defined!");
-  }
-}, 5000);
+    // 🕒 Schedule respawn safely
+    console.log(`🕒 Respawning ${monster.name} (${monster.id}) in 5 seconds...`);
+    const monsterId = monster.id;
+    this.clock.setTimeout(() => {
+      if (this.respawnMonsterById) {
+        this.respawnMonsterById(monsterId);
+      } else {
+        console.error("❌ respawnMonsterById not defined!");
+      }
+    }, 5000);
+  } // ✅ close death check
+}); // ✅ close onMessage("attack_monster")
+
 
 
 
