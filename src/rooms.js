@@ -398,23 +398,30 @@ class MMORPGRoom extends Room {
   }
 
   respawnMonster(monster) {
+  // Reset base data
   monster.hp = monster.maxHP;
-  monster.x += Math.random() * 100 - 50;
-  monster.y += Math.random() * 60 - 30;
   monster.state = "idle";
-  this.safeBroadcastToMap(monster.mapId, "monster_respawn", {
+
+  // Keep its original position from the sheet (no random offsets)
+  // and original map assignment
+  const respawnData = {
     id: monster.id,
     monsterId: monster.id,
     name: monster.name,
+    class: monster.class,
+    level: monster.level,
     mapId: monster.mapId,
-    x: monster.x,
-    y: monster.y,
+    x: monster.x,          // ← from Sheets
+    y: monster.y,          // ← from Sheets
     hp: monster.hp,
     maxHP: monster.maxHP,
     sprites: monster.sprites,
-    baseData: monster,
-  });
+    baseData: monster,     // includes everything like image URLs
+  };
+
+  this.safeBroadcastToMap(monster.mapId, "monster_respawn", respawnData);
 }
+
 
 
   /* ============================================================
