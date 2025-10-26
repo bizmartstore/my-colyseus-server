@@ -429,50 +429,56 @@ this.onMessage("attack_monster", async (client, msg) => {
   }
 
   respawnMonster(monster) {
-    if (!monster) return;
+  if (!monster) return;
 
-    console.log(`🩺 Respawning monster ${monster.id} (${monster.name}) on map ${monster.mapId}`);
+  // Ensure monster exists in state even if filtered or modified
+  if (!this.state.monsters[monster.id]) {
+    this.state.monsters[monster.id] = monster;
+  }
 
-    // ✅ Restore stats
-    monster.hp = monster.maxHP;
-    monster.state = "idle";
+  // ✅ Restore stats
+  monster.hp = monster.maxHP;
+  monster.state = "idle";
+  monster.dir = "left";
 
-    // ✅ Reset position to original spawn point
-    monster.x = monster.spawnX ?? monster.x;
-    monster.y = monster.spawnY ?? monster.y;
+  // ✅ Reset position safely
+  monster.x = monster.spawnX ?? monster.x ?? 400;
+  monster.y = monster.spawnY ?? monster.y ?? 300;
 
-    // ✅ Clean base data for client
-    const baseData = {
+  // ✅ Mark alive again
+  monster.isDead = false;
+
+  console.log(`🩺 Respawning monster ${monster.name} (${monster.id}) on map ${monster.mapId}`);
+
+  const respawnData = {
+    id: monster.id,
+    monsterId: monster.id,
+    name: monster.name,
+    mapId: Number(monster.mapId) || 101,
+    x: monster.x,
+    y: monster.y,
+    hp: monster.hp,
+    maxHP: monster.maxHP,
+    sprites: monster.sprites,
+    baseData: {
       MonsterID: monster.id,
       Name: monster.name,
-      MapID: Number(monster.mapId),
+      MapID: Number(monster.mapId) || 101,
+      PositionX: monster.x,
+      PositionY: monster.y,
       BaseHP: monster.maxHP,
-      PositionX: monster.spawnX ?? monster.x,
-      PositionY: monster.spawnY ?? monster.y,
       sprites: monster.sprites,
-    };
+    },
+  };
 
-    // ✅ Broadcast respawn to all players on same map
-    const respawnData = {
-      id: monster.id,
-      monsterId: monster.id,
-      name: monster.name,
-      mapId: monster.mapId,
-      x: monster.spawnX ?? monster.x,
-      y: monster.spawnY ?? monster.y,
-      hp: monster.hp,
-      maxHP: monster.maxHP,
-      sprites: monster.sprites,
-      baseData,
-    };
-
-    try {
-      this.safeBroadcastToMap(monster.mapId, "monster_respawn", respawnData);
-      console.log(`✅ Broadcasted respawn for ${monster.name} (${monster.id}) on map ${monster.mapId}`);
-    } catch (err) {
-      console.error(`❌ Failed to broadcast monster_respawn for ${monster.id}:`, err);
-    }
+  try {
+    this.safeBroadcastToMap(Number(monster.mapId), "monster_respawn", respawnData);
+    console.log(`✅ Broadcasted respawn for ${monster.name} (${monster.id}) on map ${monster.mapId}`);
+  } catch (err) {
+    console.error(`❌ Failed to broadcast monster_respawn for ${monster.id}:`, err);
   }
+}
+
 
 
 
