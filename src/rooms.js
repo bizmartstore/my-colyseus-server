@@ -187,52 +187,50 @@ this.onMessage("attack_monster", async (client, msg) => {
   const monster = this.state.monsters?.[msg.monsterId];
   if (!player || !monster || monster.hp <= 0) return;
 
-  // 🧮 Damage calculation
-  const baseDamage = Math.max(1, (player.attack || 1) - (monster.defense || 0));
-  const crit = Math.random() < 0.1;
-  const totalDamage = Math.floor(baseDamage * (crit ? 1.5 : 1));
+  try {
+    // 🧮 Damage calculation
+    const baseDamage = Math.max(1, (player.attack || 1) - (monster.defense || 0));
+    const crit = Math.random() < 0.1;
+    const totalDamage = Math.floor(baseDamage * (crit ? 1.5 : 1));
 
-  // 💥 Apply damage
-  monster.hp = Math.max(0, monster.hp - totalDamage);
+    // 💥 Apply damage
+    monster.hp = Math.max(0, monster.hp - totalDamage);
 
-  // 📡 Broadcast hit update
-  this.safeBroadcastToMap(player.mapId, "monster_hit", {
-    monsterId: monster.id,
-    hp: monster.hp,
-    damage: totalDamage,
-    crit,
-    attacker: player.playerName,
-  });
-
-  // 💀 Handle monster death
-  if (monster.hp <= 0) {
-    // Reward player immediately (EXP + Coins)
-    player.exp = (player.exp || 0) + (monster.exp || 0);
-    player.coins = (player.coins || 0) + (monster.coins || 0);
-
-    // Notify map clients about death
-    this.safeBroadcastToMap(player.mapId, "monster_dead", {
+    // 📡 Broadcast damage
+    this.safeBroadcastToMap(player.mapId, "monster_hit", {
       monsterId: monster.id,
-      coins: monster.coins,
-      exp: monster.exp,
-      killedBy: player.playerName,
+      hp: monster.hp,
+      damage: totalDamage,
+      crit,
+      attacker: player.playerName,
     });
 
-    // 🧩 NEW: Delegate respawn to external handler
-    this.safeBroadcastToMap(player.mapId, "monster_death_event", {
-      monsterId: monster.id,
-      mapId: monster.mapId,
-      name: monster.name,
-      x: monster.x,
-      y: monster.y,
-      baseData: monster,
-    });
+    // 💀 Monster death
+    if (monster.hp <= 0) {
+      // Reward player
+      player.exp = (player.exp || 0) + (monster.exp || 0);
+      player.coins = (player.coins || 0) + (monster.coins || 0);
 
-    console.log(
-      `📨 Delegated respawn of ${monster.name} (${monster.id}) to handleMonsterDeath()`
-    );
+      // Inform map clients
+      this.safeBroadcastToMap(player.mapId, "monster_dead", {
+        monsterId: monster.id,
+        killedBy: player.playerName,
+        exp: monster.exp,
+        coins: monster.coins,
+      });
+
+      // Mark monster dead — do not respawn server-side
+      monster.state = "dead";
+      console.log(
+        `💀 Monster ${monster.name} (${monster.id}) killed by ${player.playerName}. Respawn handled by handleMonsterSheet() client-side.`
+      );
+    }
+  } catch (err) {
+    console.error("⚠️ attack_monster failed:", err);
   }
 });
+
+
 
 
     /* ============================================================
