@@ -222,28 +222,39 @@ this.onMessage("attack_monster", async (client, msg) => {
       exp: monster.exp,
     });
 
-    // 🧩 Save monster spawn template for clean respawn
-    this._monsterSpawnTemplates = this._monsterSpawnTemplates || {};
+    // ✅ Retrieve original spawn template (clean copy)
+    const origTpl =
+      this.monsterTemplates.find((t) => String(t.id) === String(monster.id)) ||
+      this._monsterSpawnTemplates?.[monster.id];
+
+    // ✅ Deep clone template to preserve fresh data
+    const cleanTpl = origTpl
+      ? JSON.parse(JSON.stringify(origTpl))
+      : { ...monster };
+
+    // ✅ Save as respawn template
     this._monsterSpawnTemplates[monster.id] = {
-      ...monster,
-      spawnX: monster.spawnX ?? monster.x,
-      spawnY: monster.spawnY ?? monster.y,
-      maxHP: monster.maxHP || 100,
-      mapId: monster.mapId, // ✅ preserve map
+      ...cleanTpl,
+      spawnX: cleanTpl.spawnX ?? monster.spawnX ?? monster.x,
+      spawnY: cleanTpl.spawnY ?? monster.spawnY ?? monster.y,
+      maxHP: Number(cleanTpl.maxHP) || Number(monster.maxHP) || 100,
+      mapId: Number(cleanTpl.mapId) || Number(monster.mapId) || 101,
     };
 
-    // 🕒 Schedule respawn safely
-    console.log(`🕒 Respawning ${monster.name} (${monster.id}) in 5 seconds...`);
+    // 🕒 Schedule safe respawn (5 seconds)
     const monsterId = monster.id;
+    console.log(`🕒 Respawning ${monster.name} (${monster.id}) in 5 seconds...`);
+
     this.clock.setTimeout(() => {
-      if (this.respawnMonsterById) {
+      if (typeof this.respawnMonsterById === "function") {
         this.respawnMonsterById(monsterId);
       } else {
-        console.error("❌ respawnMonsterById not defined!");
+        console.error("❌ respawnMonsterById not defined or invalid!");
       }
     }, 5000);
-  } // ✅ close death check
+  } // ✅ end of death check
 }); // ✅ close onMessage("attack_monster")
+
 
 
 
@@ -404,27 +415,33 @@ this.onMessage("attack_monster", async (client, msg) => {
    🧟 Monster Logic (Fully Fixed + Safe Respawn)
    ============================================================ */
   spawnMonsters() {
-    // 🧠 Create spawn template storage
-    this._monsterSpawnTemplates = {};
+  // 🧠 Create a clean spawn template store
+  this._monsterSpawnTemplates = {};
 
-    // ✅ Spawn monsters and remember original data for respawn
-    this.monsterTemplates.forEach((t) => {
-      const monster = {
-        ...t,
-        spawnX: Number(t.x) || 400,
-        spawnY: Number(t.y) || 300,
-        hp: Number(t.hp || t.maxHP || 100),
-        maxHP: Number(t.maxHP || t.hp || 100),
-        state: "idle",
-        dir: "left",
-      };
+  this.monsterTemplates.forEach((t) => {
+    const monster = {
+      ...t,
+      spawnX: Number(t.x) || 400,
+      spawnY: Number(t.y) || 300,
+      hp: Number(t.hp || t.maxHP || 100),
+      maxHP: Number(t.maxHP || t.hp || 100),
+      state: "idle",
+      dir: "left",
+    };
 
-      this.state.monsters[t.id] = monster;
-      this._monsterSpawnTemplates[t.id] = monster; // Save for clean respawn
-    });
+    // 🧩 Put live monster into game state
+    this.state.monsters[t.id] = monster;
 
-    console.log(`🧟 Spawned ${Object.keys(this.state.monsters).length} monsters`);
-  }
+    // 🧩 Deep clone template to prevent aliasing (VERY IMPORTANT)
+    try {
+      this._monsterSpawnTemplates[t.id] = JSON.parse(JSON.stringify(monster));
+    } catch {
+      this._monsterSpawnTemplates[t.id] = { ...monster };
+    }
+  });
+
+  console.log(`🧟 Spawned ${Object.keys(this.state.monsters).length} monsters`);
+}
 
   updateMonsterMovement() {
     try {
@@ -466,7 +483,8 @@ this.onMessage("attack_monster", async (client, msg) => {
   respawnMonsterById(monsterId) {
   if (!monsterId) return;
 
-  const tpl =
+  // ✅ Find clean template
+  let tpl =
     this._monsterSpawnTemplates?.[monsterId] ||
     this.monsterTemplates.find((t) => String(t.id) === String(monsterId));
 
@@ -475,7 +493,10 @@ this.onMessage("attack_monster", async (client, msg) => {
     return;
   }
 
-  // ✅ Create a clean monster copy using saved spawn data
+  // ✅ Deep clone template to avoid mutation
+  tpl = JSON.parse(JSON.stringify(tpl));
+
+  // ✅ Create new monster
   const newMonster = {
     id: tpl.id,
     name: tpl.name,
@@ -484,7 +505,7 @@ this.onMessage("attack_monster", async (client, msg) => {
     hp: Number(tpl.maxHP) || 100,
     attack: tpl.attack || 10,
     defense: tpl.defense || 5,
-    mapId: Number(tpl.mapId) || 101, // ✅ Keep same map
+    mapId: Number(tpl.mapId) || 101,
     x: Number(tpl.spawnX) || Number(tpl.x) || 400,
     y: Number(tpl.spawnY) || Number(tpl.y) || 300,
     sprites: tpl.sprites || {},
@@ -497,7 +518,7 @@ this.onMessage("attack_monster", async (client, msg) => {
   // ✅ Replace old monster entry
   this.state.monsters[newMonster.id] = newMonster;
 
-  // ✅ Inform all players in same map
+  // ✅ Broadcast to players on same map
   const respawnData = {
     monsterId: newMonster.id,
     name: newMonster.name,
@@ -509,8 +530,16 @@ this.onMessage("attack_monster", async (client, msg) => {
     sprites: newMonster.sprites,
   };
 
+  // 🧩 Debug info
+  const recipients = this.clients.filter((c) => {
+    const p = this.state.players[c.sessionId];
+    return p && Number(p.mapId) === Number(newMonster.mapId);
+  });
+  console.log(
+    `✅ Respawned ${newMonster.name} (${newMonster.id}) on map ${newMonster.mapId} for ${recipients.length} players`
+  );
+
   this.safeBroadcastToMap(newMonster.mapId, "monster_respawn", respawnData);
-  console.log(`✅ Respawned ${newMonster.name} (${newMonster.id}) on map ${newMonster.mapId}`);
 }
 
 
