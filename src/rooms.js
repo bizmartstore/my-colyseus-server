@@ -186,93 +186,129 @@ class MMORPGRoom extends Room {
    ⚔️ Player Attack (vs Monsters) — FINAL FIXED + SAFE RESPAWN (Render-Safe)
    ============================================================ */
 this.onMessage("attack_monster", async (client, msg) => {
-  const player = this.state.players?.[client.sessionId];
-  const monster = this.state.monsters?.[msg.monsterId];
+  try {
+    const player = this.state.players?.[client.sessionId];
+    const monsterId = String(msg?.monsterId ?? "");
+    const monster = this.state.monsters?.[monsterId];
 
-  if (!player || !monster) return;
-  if (monster.hp <= 0 || monster.state === "dead") return;
+    if (!player) {
+      console.warn("[attack_monster] Unknown player:", client.sessionId);
+      return;
+    }
+    if (!monster) {
+      console.warn(`[attack_monster] Monster not found: ${monsterId}`);
+      return;
+    }
 
-  // ✅ Calculate damage
-  const baseDamage = Math.max(1, (player.attack || 1) - (monster.defense || 0));
-  const crit = Math.random() < ((player.critChance ?? 10) / 100);
-  const totalDamage = Math.floor(baseDamage * (crit ? 1.5 : 1));
+    // If monster already dead, ignore
+    if (monster.hp <= 0 || monster.state === "dead") {
+      // still optionally inform attacker that it's already dead
+      client.send("monster_already_dead", { monsterId });
+      return;
+    }
 
-  // ✅ Apply damage
-  monster.hp = Math.max(0, monster.hp - totalDamage);
+    // ---- Determine damage to apply (use client's reported damage but validate) ----
+    const reported = Math.floor(Number(msg?.damage || 0));
+    // Fallback server calculation (in case client did not send damage)
+    const fallbackDamage = Math.max(1, (player.attack || 1) - (monster.defense || 0));
+    // Anti-cheat cap: allow at most X times player's base attack (tunable)
+    const MAX_MULTIPLIER = 6; // safe upper bound; adjust as needed
+    const maxAllowed = Math.max(1, (player.attack || 1) * MAX_MULTIPLIER);
 
-  // ✅ Broadcast hit to all players on the same map
-  this.safeBroadcastToMap(player.mapId, "monster_hit", {
-    monsterId: monster.id,
-    hp: monster.hp,
-    damage: totalDamage,
-    crit,
-    attacker: player.playerName,
-  });
+    // Pick reported damage if sensible, otherwise fallback
+    let serverDamage = reported > 0 ? reported : fallbackDamage;
+    // Clamp to avoid massive spoofing
+    if (serverDamage > maxAllowed) {
+      console.warn(
+        `[attack_monster] Clamped damage from ${serverDamage} to ${maxAllowed} for ${player.playerName}`
+      );
+      serverDamage = maxAllowed;
+    }
 
-  // ✅ Monster death check
-  if (monster.hp <= 0) {
-    monster.state = "dead";
-    console.log(`💀 ${monster.name} (${monster.id}) killed by ${player.playerName}`);
+    // Also ensure it does at least 1 damage
+    serverDamage = Math.max(1, Math.floor(serverDamage));
 
-    // ✅ Reward player
-    player.exp = (player.exp || 0) + (monster.exp || 0);
-    player.coins = (player.coins || 0) + (monster.coins || 0);
+    // Apply damage (respect current hp)
+    const prevHP = Number(monster.hp || 0);
+    monster.hp = Math.max(0, prevHP - serverDamage);
 
-    // ✅ Notify all clients on same map of death
-    this.safeBroadcastToMap(player.mapId, "monster_dead", {
+    // Optional: record lastAttacker info for loot attribution
+    monster.lastAttackedBy = player.email || player.playerName || client.sessionId;
+
+    // Broadcast the hit to players on the same map (keep clients in sync)
+    this.safeBroadcastToMap(player.mapId, "monster_hit", {
       monsterId: monster.id,
-      coins: monster.coins,
-      exp: monster.exp,
+      hp: monster.hp,
+      damage: serverDamage,
+      crit: !!msg.crit,
+      attacker: player.playerName,
     });
 
-    // ✅ Ensure respawn template store exists
-    this._monsterSpawnTemplates ||= {};
+    console.log(
+      `[attack_monster] ${player.playerName} hit ${monster.name} (${monster.id}) -${serverDamage} → ${monster.hp}/${monster.maxHP}`
+    );
 
-    // ✅ Find and clone original spawn template
-    const origTpl =
-      this.monsterTemplates.find((t) => String(t.id) === String(monster.id)) ||
-      this._monsterSpawnTemplates?.[monster.id] ||
-      monster;
+    // Death handling
+    if (monster.hp <= 0) {
+      monster.state = "dead";
+      monster.hp = 0;
+      console.log(`💀 ${monster.name} (${monster.id}) killed by ${player.playerName}`);
 
-    const cleanTpl = JSON.parse(JSON.stringify(origTpl));
+      // Reward player (server authoritative)
+      player.exp = (player.exp || 0) + (monster.exp || 0);
+      player.coins = (player.coins || 0) + (monster.coins || 0);
 
-    // ✅ Save safe respawn template (retains correct map & spawn pos)
-    this._monsterSpawnTemplates[monster.id] = {
-      ...cleanTpl,
-      spawnX: cleanTpl.spawnX ?? monster.spawnX ?? monster.x,
-      spawnY: cleanTpl.spawnY ?? monster.spawnY ?? monster.y,
-      maxHP: Number(cleanTpl.maxHP) || Number(monster.maxHP) || 100,
-      mapId: Number(cleanTpl.mapId) || Number(monster.mapId) || Number(player.mapId) || 101,
-      coins: cleanTpl.coins || monster.coins || 0,
-      exp: cleanTpl.exp || monster.exp || 0,
-    };
+      // Broadcast death to players on same map
+      this.safeBroadcastToMap(player.mapId, "monster_dead", {
+        monsterId: monster.id,
+        coins: monster.coins,
+        exp: monster.exp,
+        killedBy: player.playerName,
+      });
 
-    // 🕒 Schedule respawn after 5 seconds (Render-safe version)
-    const monsterId = monster.id;
-    const mapId = Number(monster.mapId) || Number(player.mapId);
-    const self = this; // ✅ preserve context
+      // Save spawn template if not present yet
+      this._monsterSpawnTemplates ||= {};
+      const origTpl =
+        this.monsterTemplates.find((t) => String(t.id) === String(monster.id)) ||
+        this._monsterSpawnTemplates?.[monster.id] ||
+        monster;
+      const cleanTpl = JSON.parse(JSON.stringify(origTpl));
+      this._monsterSpawnTemplates[monster.id] = {
+        ...cleanTpl,
+        spawnX: cleanTpl.spawnX ?? monster.spawnX ?? monster.x,
+        spawnY: cleanTpl.spawnY ?? monster.spawnY ?? monster.y,
+        maxHP: Number(cleanTpl.maxHP) || Number(monster.maxHP) || 100,
+        mapId: Number(cleanTpl.mapId) || Number(monster.mapId) || Number(player.mapId) || 101,
+        coins: cleanTpl.coins || monster.coins || 0,
+        exp: cleanTpl.exp || monster.exp || 0,
+      };
 
-    try {
-      console.log(`[DEBUG] Scheduling respawn for ${monster.name} (${monsterId}) in 5s on map ${mapId}...`);
+      // Schedule respawn (use Colyseus clock if available)
+      const monsterIdLocal = monster.id;
+      const mapId = Number(monster.mapId) || Number(player.mapId);
+      const timer = this.clock?.setTimeout ? this.clock.setTimeout.bind(this.clock) : setTimeout;
 
-      // Use safe timer (fallback to setTimeout if Colyseus clock missing)
-      const timer = self.clock?.setTimeout
-        ? self.clock.setTimeout.bind(self.clock)
-        : setTimeout;
-
-      timer(() => {
-        console.log(`🔄 Attempting respawn for ${monsterId} on map ${mapId}`);
-        if (typeof self.respawnMonsterById === "function") {
-          self.respawnMonsterById(monsterId);
-        } else {
-          console.error("❌ respawnMonsterById not defined or invalid!");
-        }
-      }, 5000);
-    } catch (err) {
-      console.error("⚠️ Failed to schedule monster respawn:", err);
+      try {
+        console.log(
+          `[DEBUG] Scheduling respawn for ${monster.name} (${monsterIdLocal}) in 5s on map ${mapId}`
+        );
+        timer(() => {
+          console.log(`🔄 Attempting respawn for ${monsterIdLocal} on map ${mapId}`);
+          if (typeof this.respawnMonsterById === "function") {
+            this.respawnMonsterById(monsterIdLocal);
+          } else {
+            console.error("❌ respawnMonsterById not defined or invalid!");
+          }
+        }, 5000);
+      } catch (err) {
+        console.error("⚠️ Failed to schedule monster respawn:", err);
+      }
     }
+  } catch (err) {
+    console.error("❌ attack_monster handler failed:", err);
   }
 });
+
 
 
 
