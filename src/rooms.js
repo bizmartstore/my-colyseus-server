@@ -180,81 +180,83 @@ class MMORPGRoom extends Room {
     });
 
     /* ============================================================
-   ⚔️ Player Attack (vs Monsters) — FULLY FIXED & SAFE RESPAWN
-   ============================================================ */
+   ⚔️ Player Attack (vs Monsters) — FULLY FIXED & SAFE RESPAWN
+   ============================================================ */
 this.onMessage("attack_monster", async (client, msg) => {
-  const player = this.state.players?.[client.sessionId];
-  const monster = this.state.monsters?.[msg.monsterId];
+  const player = this.state.players?.[client.sessionId];
+  const monster = this.state.monsters?.[msg.monsterId];
 
-  if (!player || !monster) return;
-  if (monster.hp <= 0 || monster.state === "dead") return;
+  if (!player || !monster) return;
+  if (monster.hp <= 0 || monster.state === "dead") return;
 
-  // ✅ Calculate damage
-  const baseDamage = Math.max(1, (player.attack || 1) - (monster.defense || 0));
-  const crit = Math.random() < ((player.critChance ?? 10) / 100);
-  const totalDamage = Math.floor(baseDamage * (crit ? 1.5 : 1));
+  // ✅ Calculate damage (RESTORED)
+  const baseDamage = Math.max(1, (player.attack || 1) - (monster.defense || 0));
+  const crit = Math.random() < ((player.critChance ?? 10) / 100);
+  const totalDamage = Math.floor(baseDamage * (crit ? 1.5 : 1));
 
-  // ✅ Apply damage
-  monster.hp = Math.max(0, monster.hp - totalDamage);
+  // ✅ Apply damage (RESTORED)
+  monster.hp = Math.max(0, monster.hp - totalDamage);
 
-  // ✅ Broadcast hit to players on same map
-  this.safeBroadcastToMap(player.mapId, "monster_hit", {
-    monsterId: monster.id,
-    hp: monster.hp,
-    damage: totalDamage,
-    crit,
-    attacker: player.playerName,
-  });
+  // ✅ Broadcast hit to players on same map (RESTORED)
+  this.safeBroadcastToMap(player.mapId, "monster_hit", {
+    monsterId: monster.id,
+    hp: monster.hp,
+    damage: totalDamage,
+    crit,
+    attacker: player.playerName,
+  });
 
-  // ✅ Monster death check
-  if (monster.hp <= 0) {
-    monster.state = "dead";
-    console.log(`💀 ${monster.name} (${monster.id}) killed by ${player.playerName}`);
+  // ✅ Monster death check
+  if (monster.hp <= 0) {
+    monster.state = "dead";
+    console.log(`💀 ${monster.name} (${monster.id}) killed by ${player.playerName}`);
 
-    // ✅ Reward player
-    player.exp = (player.exp || 0) + (monster.exp || 0);
-    player.coins = (player.coins || 0) + (monster.coins || 0);
+    // ✅ Reward player (RESTORED)
+    player.exp = (player.exp || 0) + (monster.exp || 0);
+    player.coins = (player.coins || 0) + (monster.coins || 0);
 
-    // ✅ Notify clients of death
-    this.safeBroadcastToMap(player.mapId, "monster_dead", {
-      monsterId: monster.id,
-      coins: monster.coins,
-      exp: monster.exp,
-    });
+    // ✅ Notify clients of death (RESTORED)
+    this.safeBroadcastToMap(player.mapId, "monster_dead", {
+      monsterId: monster.id,
+      coins: monster.coins,
+      exp: monster.exp,
+    });
 
-    // ✅ Retrieve original spawn template (clean copy)
-    const origTpl =
-      this.monsterTemplates.find((t) => String(t.id) === String(monster.id)) ||
-      this._monsterSpawnTemplates?.[monster.id];
+    // ✅ Retrieve original spawn template (clean copy)
+    const origTpl =
+      this.monsterTemplates.find((t) => String(t.id) === String(monster.id)) ||
+      this._monsterSpawnTemplates?.[monster.id];
 
-    // ✅ Deep clone template to preserve fresh data
-    const cleanTpl = origTpl
-      ? JSON.parse(JSON.stringify(origTpl))
-      : { ...monster };
+    // ✅ Deep clone template to preserve fresh data
+    const cleanTpl = origTpl
+      ? JSON.parse(JSON.stringify(origTpl))
+      : { ...monster };
 
-    // ✅ Save as respawn template
-    this._monsterSpawnTemplates[monster.id] = {
-      ...cleanTpl,
-      spawnX: cleanTpl.spawnX ?? monster.spawnX ?? monster.x,
-      spawnY: cleanTpl.spawnY ?? monster.spawnY ?? monster.y,
-      maxHP: Number(cleanTpl.maxHP) || Number(monster.maxHP) || 100,
-      mapId: Number(cleanTpl.mapId) || Number(monster.mapId) || 101,
-    };
+    // ✅ Save as respawn template (Respawn Data Fix Confirmed)
+    this._monsterSpawnTemplates[monster.id] = {
+      ...cleanTpl,
+      spawnX: cleanTpl.spawnX ?? monster.spawnX ?? monster.x,
+      spawnY: cleanTpl.spawnY ?? monster.spawnY ?? monster.y,
+      maxHP: Number(cleanTpl.maxHP) || Number(monster.maxHP) || 100,
+      mapId: Number(cleanTpl.mapId) || Number(monster.mapId) || 101,
+      // 💥 FIX APPLIED HERE: Add coins and exp from the clean template/live monster
+      coins: cleanTpl.coins || monster.coins || 0,
+      exp: cleanTpl.exp || monster.exp || 0,
+    };
 
-    // 🕒 Schedule safe respawn (5 seconds)
-    const monsterId = monster.id;
-    console.log(`🕒 Respawning ${monster.name} (${monster.id}) in 5 seconds...`);
+    // 🕒 Schedule safe respawn (5 seconds)
+    const monsterId = monster.id;
+    console.log(`🕒 Respawning ${monster.name} (${monster.id}) in 5 seconds...`);
 
-    this.clock.setTimeout(() => {
-      if (typeof this.respawnMonsterById === "function") {
-        this.respawnMonsterById(monsterId);
-      } else {
-        console.error("❌ respawnMonsterById not defined or invalid!");
-      }
-    }, 5000);
-  } // ✅ end of death check
+    this.clock.setTimeout(() => {
+      if (typeof this.respawnMonsterById === "function") {
+        this.respawnMonsterById(monsterId);
+      } else {
+        console.error("❌ respawnMonsterById not defined or invalid!");
+      }
+    }, 5000);
+  } // ✅ end of death check
 }); // ✅ close onMessage("attack_monster")
-
 
 
 
