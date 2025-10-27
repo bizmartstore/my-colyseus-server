@@ -478,68 +478,78 @@ this.onMessage("attack_monster", async (client, msg) => {
   }
 
   /* ============================================================
-     ♻️ Safe Monster Respawn (Fixed)
-     ============================================================ */
-  respawnMonsterById(monsterId) {
-  if (!monsterId) return;
+     ♻️ Safe Monster Respawn (Fixed)
+     ============================================================ */
+  respawnMonsterById(monsterId) {
+  if (!monsterId) return;
 
-  // ✅ Find clean template
-  let tpl =
-    this._monsterSpawnTemplates?.[monsterId] ||
-    this.monsterTemplates.find((t) => String(t.id) === String(monsterId));
+  // ✅ Find clean template
+  let tpl =
+    this._monsterSpawnTemplates?.[monsterId] ||
+    this.monsterTemplates.find((t) => String(t.id) === String(monsterId));
 
-  if (!tpl) {
-    console.warn(`❌ No template found for respawn ${monsterId}`);
-    return;
-  }
+  if (!tpl) {
+    console.warn(`❌ No template found for respawn ${monsterId}`);
+    return;
+  }
 
-  // ✅ Deep clone template to avoid mutation
-  tpl = JSON.parse(JSON.stringify(tpl));
+  // ✅ Deep clone template to avoid mutation
+  tpl = JSON.parse(JSON.stringify(tpl));
 
-  // ✅ Create new monster
-  const newMonster = {
-    id: tpl.id,
-    name: tpl.name,
-    level: tpl.level || 1,
-    maxHP: Number(tpl.maxHP) || 100,
-    hp: Number(tpl.maxHP) || 100,
-    attack: tpl.attack || 10,
-    defense: tpl.defense || 5,
-    mapId: Number(tpl.mapId) || 101,
-    x: Number(tpl.spawnX) || Number(tpl.x) || 400,
-    y: Number(tpl.spawnY) || Number(tpl.y) || 300,
-    sprites: tpl.sprites || {},
-    state: "idle",
-    dir: "left",
-    spawnX: tpl.spawnX ?? tpl.x,
-    spawnY: tpl.spawnY ?? tpl.y,
-  };
+  // ✅ Create new monster
+  const newMonster = {
+    id: tpl.id,
+    name: tpl.name,
+    level: tpl.level || 1,
+    maxHP: Number(tpl.maxHP) || 100,
+    hp: Number(tpl.maxHP) || 100,
+    attack: tpl.attack || 10,
+    defense: tpl.defense || 5,
+    mapId: Number(tpl.mapId) || 101,
+    x: Number(tpl.spawnX) || Number(tpl.x) || 400,
+    y: Number(tpl.spawnY) || Number(tpl.y) || 300,
+    sprites: tpl.sprites || {},
+    state: "idle",
+    dir: "left",
+    spawnX: tpl.spawnX ?? tpl.x,
+    spawnY: tpl.spawnY ?? tpl.y,
+    // Add coins and exp back to the object for respawn
+    coins: tpl.coins || 0,
+    exp: tpl.exp || 0,
+  };
 
-  // ✅ Replace old monster entry
-  this.state.monsters[newMonster.id] = newMonster;
+  // ✅ Replace old monster entry
+  this.state.monsters[newMonster.id] = newMonster;
 
-  // ✅ Broadcast to players on same map
-  const respawnData = {
-    monsterId: newMonster.id,
-    name: newMonster.name,
-    mapId: newMonster.mapId,
-    x: newMonster.x,
-    y: newMonster.y,
-    hp: newMonster.hp,
-    maxHP: newMonster.maxHP,
-    sprites: newMonster.sprites,
-  };
+  // ✅ Broadcast to players on same map
+  const respawnData = {
+    monsterId: newMonster.id,
+    
+    // 💥 FIX: Send the entire monster object as 'baseData'
+    baseData: newMonster, 
+    
+    name: newMonster.name,
+    mapId: newMonster.mapId,
+    x: newMonster.x,
+    y: newMonster.y,
+    hp: newMonster.hp,
+    maxHP: newMonster.maxHP,
+    sprites: newMonster.sprites,
+    // Include coins and exp for client logic
+    coins: newMonster.coins, 
+    exp: newMonster.exp, 
+  };
 
-  // 🧩 Debug info
-  const recipients = this.clients.filter((c) => {
-    const p = this.state.players[c.sessionId];
-    return p && Number(p.mapId) === Number(newMonster.mapId);
-  });
-  console.log(
-    `✅ Respawned ${newMonster.name} (${newMonster.id}) on map ${newMonster.mapId} for ${recipients.length} players`
-  );
+  // 🧩 Debug info
+  const recipients = this.clients.filter((c) => {
+    const p = this.state.players[c.sessionId];
+    return p && Number(p.mapId) === Number(newMonster.mapId);
+  });
+  console.log(
+    `✅ Respawned ${newMonster.name} (${newMonster.id}) on map ${newMonster.mapId} for ${recipients.length} players`
+  );
 
-  this.safeBroadcastToMap(newMonster.mapId, "monster_respawn", respawnData);
+  this.safeBroadcastToMap(newMonster.mapId, "monster_respawn", respawnData);
 }
 
 
