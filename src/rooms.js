@@ -183,7 +183,7 @@ class MMORPGRoom extends Room {
     });
 
     /* ============================================================
-   ⚔️ Player Attack (vs Monsters) — FINAL FIXED + SAFE RESPAWN
+   ⚔️ Player Attack (vs Monsters) — FINAL FIXED + SAFE RESPAWN (Render-Safe)
    ============================================================ */
 this.onMessage("attack_monster", async (client, msg) => {
   const player = this.state.players?.[client.sessionId];
@@ -247,22 +247,33 @@ this.onMessage("attack_monster", async (client, msg) => {
       exp: cleanTpl.exp || monster.exp || 0,
     };
 
-    // 🕒 Schedule respawn after 5 seconds
+    // 🕒 Schedule respawn after 5 seconds (Render-safe version)
     const monsterId = monster.id;
     const mapId = Number(monster.mapId) || Number(player.mapId);
+    const self = this; // ✅ preserve context
 
-    console.log(`🕒 Respawning ${monster.name} (${monster.id}) in 5 seconds on map ${mapId}...`);
+    try {
+      console.log(`[DEBUG] Scheduling respawn for ${monster.name} (${monsterId}) in 5s on map ${mapId}...`);
 
-    this.clock.setTimeout(() => {
-      console.log(`🔄 Attempting respawn for ${monsterId} on map ${mapId}`);
-      if (typeof this.respawnMonsterById === "function") {
-        this.respawnMonsterById(monsterId);
-      } else {
-        console.error("❌ respawnMonsterById not defined or invalid!");
-      }
-    }, 5000);
+      // Use safe timer (fallback to setTimeout if Colyseus clock missing)
+      const timer = self.clock?.setTimeout
+        ? self.clock.setTimeout.bind(self.clock)
+        : setTimeout;
+
+      timer(() => {
+        console.log(`🔄 Attempting respawn for ${monsterId} on map ${mapId}`);
+        if (typeof self.respawnMonsterById === "function") {
+          self.respawnMonsterById(monsterId);
+        } else {
+          console.error("❌ respawnMonsterById not defined or invalid!");
+        }
+      }, 5000);
+    } catch (err) {
+      console.error("⚠️ Failed to schedule monster respawn:", err);
+    }
   }
 });
+
 
 
 
