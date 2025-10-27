@@ -183,7 +183,7 @@ class MMORPGRoom extends Room {
     });
 
     /* ============================================================
-   ⚔️ Player Attack (vs Monsters) — FULLY FIXED & SAFE RESPAWN
+   ⚔️ Player Attack (vs Monsters) — FINAL FIXED + SAFE RESPAWN
    ============================================================ */
 this.onMessage("attack_monster", async (client, msg) => {
   const player = this.state.players?.[client.sessionId];
@@ -218,51 +218,52 @@ this.onMessage("attack_monster", async (client, msg) => {
     player.exp = (player.exp || 0) + (monster.exp || 0);
     player.coins = (player.coins || 0) + (monster.coins || 0);
 
-    // ✅ Notify clients of death
+    // ✅ Notify all clients on same map of death
     this.safeBroadcastToMap(player.mapId, "monster_dead", {
       monsterId: monster.id,
       coins: monster.coins,
       exp: monster.exp,
     });
 
-    // ✅ Safety guard (important fix!)
-    if (!this._monsterSpawnTemplates) this._monsterSpawnTemplates = {};
+    // ✅ Ensure respawn template store exists
+    this._monsterSpawnTemplates ||= {};
 
-    // ✅ Retrieve original spawn template
+    // ✅ Find and clone original spawn template
     const origTpl =
       this.monsterTemplates.find((t) => String(t.id) === String(monster.id)) ||
-      this._monsterSpawnTemplates?.[monster.id];
+      this._monsterSpawnTemplates?.[monster.id] ||
+      monster;
 
-    // ✅ Deep clone template to preserve original data
-    const cleanTpl = origTpl
-      ? JSON.parse(JSON.stringify(origTpl))
-      : { ...monster };
+    const cleanTpl = JSON.parse(JSON.stringify(origTpl));
 
-    // ✅ Save as respawn template (Respawn Data Fix Confirmed)
+    // ✅ Save safe respawn template (retains correct map & spawn pos)
     this._monsterSpawnTemplates[monster.id] = {
       ...cleanTpl,
       spawnX: cleanTpl.spawnX ?? monster.spawnX ?? monster.x,
       spawnY: cleanTpl.spawnY ?? monster.spawnY ?? monster.y,
       maxHP: Number(cleanTpl.maxHP) || Number(monster.maxHP) || 100,
-      mapId: Number(cleanTpl.mapId) || Number(monster.mapId) || 101,
+      mapId: Number(cleanTpl.mapId) || Number(monster.mapId) || Number(player.mapId) || 101,
       coins: cleanTpl.coins || monster.coins || 0,
       exp: cleanTpl.exp || monster.exp || 0,
     };
 
-    // 🕒 Schedule safe respawn (5 seconds)
+    // 🕒 Schedule respawn after 5 seconds
     const monsterId = monster.id;
-    console.log(`🕒 Respawning ${monster.name} (${monster.id}) in 5 seconds...`);
+    const mapId = Number(monster.mapId) || Number(player.mapId);
+
+    console.log(`🕒 Respawning ${monster.name} (${monster.id}) in 5 seconds on map ${mapId}...`);
 
     this.clock.setTimeout(() => {
-      console.log(`🔄 Attempting respawn for ${monsterId}`);
+      console.log(`🔄 Attempting respawn for ${monsterId} on map ${mapId}`);
       if (typeof this.respawnMonsterById === "function") {
         this.respawnMonsterById(monsterId);
       } else {
         console.error("❌ respawnMonsterById not defined or invalid!");
       }
     }, 5000);
-  } // end death check
-}); // ✅ close onMessage("attack_monster")
+  }
+});
+
 
 
 
@@ -609,32 +610,63 @@ respawnMonsterById(monsterId) {
 
 
 
+/* ============================================================
+   📡 Safe Broadcast Utilities (Fixed + Type-Safe + Debug Logs)
+   ============================================================ */
+safeBroadcastToMap(mapId, event, data) {
+  try {
+    if (mapId === undefined || mapId === null) {
+      console.warn(`⚠️ safeBroadcastToMap called with invalid mapId:`, mapId);
+      return;
+    }
 
-  /* ============================================================
-     📡 Safe Broadcast Utilities
-     ============================================================ */
-  safeBroadcastToMap(mapId, event, data) {
+    const targetMap = Number(mapId);
+    let sentCount = 0;
+
     for (const c of this.clients) {
       const p = this.state.players[c.sessionId];
-      if (p?.mapId === mapId) {
+      if (!p) continue;
+
+      // ✅ Convert both map IDs to numbers to avoid type mismatch
+      if (Number(p.mapId) === targetMap) {
         try {
           c.send(event, data);
+          sentCount++;
         } catch (err) {
           console.warn(`⚠️ Failed to send ${event} to ${c.sessionId}:`, err);
         }
       }
     }
-  }
 
-  safeBroadcast(event, data) {
+    // 🧠 Helpful debug info
+    console.log(
+      `📡 Broadcasted "${event}" to map ${targetMap} (${sentCount} players)`
+    );
+
+  } catch (err) {
+    console.error(`❌ safeBroadcastToMap failed for event "${event}":`, err);
+  }
+}
+
+safeBroadcast(event, data) {
+  try {
+    let sentCount = 0;
     for (const c of this.clients) {
       try {
         c.send(event, data);
+        sentCount++;
       } catch (err) {
-        console.warn(`⚠️ safeBroadcast failed for ${event}:`, err);
+        console.warn(`⚠️ safeBroadcast failed for ${event} to ${c.sessionId}:`, err);
       }
     }
+
+    if (sentCount > 0) {
+      console.log(`📢 Broadcasted "${event}" globally to ${sentCount} clients`);
+    }
+  } catch (err) {
+    console.error(`❌ safeBroadcast failed for "${event}":`, err);
   }
+}
 
   /* ============================================================
      🧹 Room Disposal
