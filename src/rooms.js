@@ -139,9 +139,6 @@ class MMORPGRoom extends Room {
     this.setSeatReservationTime(20);
     this.setState({ players: {}, monsters: {} });
 
-    // 🧩 Initialize monster respawn template store (FIX ADDED)
-    this._monsterSpawnTemplates = {};
-
     /* ============================================================
        📜 Load and Spawn Monsters
        ============================================================ */
@@ -183,138 +180,37 @@ class MMORPGRoom extends Room {
     });
 
     /* ============================================================
-   ⚔️ Player Attack (vs Monsters) — FINAL FIXED + SAFE RESPAWN (Render-Safe)
-   ============================================================ */
-this.onMessage("attack_monster", async (client, msg) => {
-  try {
-    const player = this.state.players?.[client.sessionId];
-    const monsterId = String(msg?.monsterId ?? "");
-    const monster = this.state.monsters?.[monsterId];
+       ⚔️ Player Attack (vs Monsters)
+       ============================================================ */
+    this.onMessage("attack_monster", async (client, msg) => {
+      const player = this.state.players?.[client.sessionId];
+      const monster = this.state.monsters?.[msg.monsterId];
+      if (!player || !monster || monster.hp <= 0) return;
 
-    if (!player) {
-      console.warn("[attack_monster] Unknown player:", client.sessionId);
-      return;
-    }
-    if (!monster) {
-      console.warn(`[attack_monster] Monster not found: ${monsterId}`);
-      return;
-    }
+      const baseDamage = Math.max(1, (player.attack || 1) - (monster.defense || 0));
+      const crit = Math.random() < 0.1;
+      const totalDamage = Math.floor(baseDamage * (crit ? 1.5 : 1));
+      monster.hp = Math.max(0, monster.hp - totalDamage);
 
-    // If monster already dead, ignore
-    if (monster.hp <= 0 || monster.state === "dead") {
-      // still optionally inform attacker that it's already dead
-      client.send("monster_already_dead", { monsterId });
-      return;
-    }
-
-    // ---- Determine damage to apply (use client's reported damage but validate) ----
-    const reported = Math.floor(Number(msg?.damage || 0));
-    // Fallback server calculation (in case client did not send damage)
-    const fallbackDamage = Math.max(1, (player.attack || 1) - (monster.defense || 0));
-    // Anti-cheat cap: allow at most X times player's base attack (tunable)
-    const MAX_MULTIPLIER = 6; // safe upper bound; adjust as needed
-    const maxAllowed = Math.max(1, (player.attack || 1) * MAX_MULTIPLIER);
-
-    // Pick reported damage if sensible, otherwise fallback
-    let serverDamage = reported > 0 ? reported : fallbackDamage;
-    // Clamp to avoid massive spoofing
-    if (serverDamage > maxAllowed) {
-      console.warn(
-        `[attack_monster] Clamped damage from ${serverDamage} to ${maxAllowed} for ${player.playerName}`
-      );
-      serverDamage = maxAllowed;
-    }
-
-    // Also ensure it does at least 1 damage
-    serverDamage = Math.max(1, Math.floor(serverDamage));
-
-    // Apply damage (respect current hp)
-    const prevHP = Number(monster.hp || 0);
-    monster.hp = Math.max(0, prevHP - serverDamage);
-
-    // Optional: record lastAttacker info for loot attribution
-    monster.lastAttackedBy = player.email || player.playerName || client.sessionId;
-
-    // Broadcast the hit to players on the same map (keep clients in sync)
-    this.safeBroadcastToMap(player.mapId, "monster_hit", {
-      monsterId: monster.id,
-      hp: monster.hp,
-      damage: serverDamage,
-      crit: !!msg.crit,
-      attacker: player.playerName,
-    });
-
-    console.log(
-      `[attack_monster] ${player.playerName} hit ${monster.name} (${monster.id}) -${serverDamage} → ${monster.hp}/${monster.maxHP}`
-    );
-
-    // Death handling
-    if (monster.hp <= 0) {
-      monster.state = "dead";
-      monster.hp = 0;
-      console.log(`💀 ${monster.name} (${monster.id}) killed by ${player.playerName}`);
-
-      // Reward player (server authoritative)
-      player.exp = (player.exp || 0) + (monster.exp || 0);
-      player.coins = (player.coins || 0) + (monster.coins || 0);
-
-      // Broadcast death to players on same map
-      this.safeBroadcastToMap(player.mapId, "monster_dead", {
+      this.safeBroadcastToMap(player.mapId, "monster_hit", {
         monsterId: monster.id,
-        coins: monster.coins,
-        exp: monster.exp,
-        killedBy: player.playerName,
+        hp: monster.hp,
+        damage: totalDamage,
+        crit,
+        attacker: player.playerName,
       });
 
-      // Save spawn template if not present yet
-      this._monsterSpawnTemplates ||= {};
-      const origTpl =
-        this.monsterTemplates.find((t) => String(t.id) === String(monster.id)) ||
-        this._monsterSpawnTemplates?.[monster.id] ||
-        monster;
-      const cleanTpl = JSON.parse(JSON.stringify(origTpl));
-      this._monsterSpawnTemplates[monster.id] = {
-        ...cleanTpl,
-        spawnX: cleanTpl.spawnX ?? monster.spawnX ?? monster.x,
-        spawnY: cleanTpl.spawnY ?? monster.spawnY ?? monster.y,
-        maxHP: Number(cleanTpl.maxHP) || Number(monster.maxHP) || 100,
-        mapId: Number(cleanTpl.mapId) || Number(monster.mapId) || Number(player.mapId) || 101,
-        coins: cleanTpl.coins || monster.coins || 0,
-        exp: cleanTpl.exp || monster.exp || 0,
-      };
-
-      // Schedule respawn (use Colyseus clock if available)
-      const monsterIdLocal = monster.id;
-      const mapId = Number(monster.mapId) || Number(player.mapId);
-      const timer = this.clock?.setTimeout ? this.clock.setTimeout.bind(this.clock) : setTimeout;
-
-      try {
-        console.log(
-          `[DEBUG] Scheduling respawn for ${monster.name} (${monsterIdLocal}) in 5s on map ${mapId}`
-        );
-        timer(() => {
-          console.log(`🔄 Attempting respawn for ${monsterIdLocal} on map ${mapId}`);
-          if (typeof this.respawnMonsterById === "function") {
-            this.respawnMonsterById(monsterIdLocal);
-          } else {
-            console.error("❌ respawnMonsterById not defined or invalid!");
-          }
-        }, 5000);
-      } catch (err) {
-        console.error("⚠️ Failed to schedule monster respawn:", err);
+      if (monster.hp <= 0) {
+        this.safeBroadcastToMap(player.mapId, "monster_dead", {
+          monsterId: monster.id,
+          coins: monster.coins,
+          exp: monster.exp,
+        });
+        player.exp = (player.exp || 0) + monster.exp;
+        player.coins = (player.coins || 0) + monster.coins;
+        this.clock.setTimeout(() => this.respawnMonster(monster), 5000);
       }
-    }
-  } catch (err) {
-    console.error("❌ attack_monster handler failed:", err);
-  }
-});
-
-
-
-
-
-
-
+    });
 
     /* ============================================================
        ⚔️ Player Attack (vs Players)
@@ -468,53 +364,23 @@ this.onMessage("attack_monster", async (client, msg) => {
   }
 
   /* ============================================================
-   🧟 Monster Logic (Fully Fixed + Safe Respawn)
-   ============================================================ */
+     🧟 Monster Logic
+     ============================================================ */
   spawnMonsters() {
-  // 🧠 Create a clean spawn template store
-  this._monsterSpawnTemplates = {};
-
-  this.monsterTemplates.forEach((t) => {
-    const monster = {
-      ...t,
-      spawnX: Number(t.x) || 400,
-      spawnY: Number(t.y) || 300,
-      hp: Number(t.hp || t.maxHP || 100),
-      maxHP: Number(t.maxHP || t.hp || 100),
-      state: "idle",
-      dir: "left",
-    };
-
-    // 🧩 Put live monster into game state
-    this.state.monsters[t.id] = monster;
-
-    // 🧩 Deep clone template to prevent aliasing (VERY IMPORTANT)
-    try {
-      this._monsterSpawnTemplates[t.id] = JSON.parse(JSON.stringify(monster));
-    } catch {
-      this._monsterSpawnTemplates[t.id] = { ...monster };
-    }
-  });
-
-  console.log(`🧟 Spawned ${Object.keys(this.state.monsters).length} monsters`);
-}
+    this.monsterTemplates.forEach((t) => (this.state.monsters[t.id] = { ...t }));
+    console.log(`🧟 Spawned ${Object.keys(this.state.monsters).length} monsters`);
+  }
 
   updateMonsterMovement() {
     try {
       const lightMonsters = [];
-
       for (const m of Object.values(this.state.monsters)) {
-        if (m.hp <= 0 || m.state === "dead") continue;
-
-        // 50% chance to move or idle
+        if (m.hp <= 0) continue;
         if (Math.random() < 0.5) {
           m.dir = Math.random() < 0.5 ? "left" : "right";
           m.state = "walk";
           m.x += m.dir === "left" ? -30 : 30;
-        } else {
-          m.state = "idle";
-        }
-
+        } else m.state = "idle";
         lightMonsters.push({
           id: m.id,
           x: m.x,
@@ -525,118 +391,50 @@ this.onMessage("attack_monster", async (client, msg) => {
           mapId: m.mapId,
         });
       }
-
-      // ✅ Send minimal update packet
       this.safeBroadcast("monsters_update", lightMonsters);
     } catch (err) {
       console.error("⚠️ updateMonsterMovement failed:", err);
     }
   }
 
+  respawnMonster(monster) {
+    monster.hp = monster.maxHP;
+    monster.x += Math.random() * 100 - 50;
+    monster.y += Math.random() * 60 - 30;
+    monster.state = "idle";
+    this.safeBroadcastToMap(monster.mapId, "monster_respawn", {
+      id: monster.id,
+      x: monster.x,
+      y: monster.y,
+      hp: monster.hp,
+    });
+  }
+
   /* ============================================================
-   ♻️ Safe Monster Respawn (Full Stats from Sheet + Auto-map)
-   ============================================================ */
-respawnMonsterById(monsterId) {
-  if (!monsterId) return;
-  console.log("🧩 respawnMonsterById called for", monsterId);
-
-  this._monsterSpawnTemplates ||= {};
-  let tpl =
-    this._monsterSpawnTemplates[monsterId] ||
-    this.monsterTemplates.find((t) => String(t.id) === String(monsterId));
-
-  console.log("📜 Respawn template found:", tpl ? "✅ YES" : "❌ NO");
-  if (!tpl) return;
-
-  tpl = JSON.parse(JSON.stringify(tpl));
-
-  // ✅ Ensure mapId exists
-  const mapId =
-    Number(tpl.mapId) ||
-    Number(tpl.MapID) ||
-    Number(this.state.monsters[monsterId]?.mapId) ||
-    101;
-
-  // ✅ Create fresh monster instance
-  const newMonster = {
-    ...tpl,
-    id: tpl.id,
-    name: tpl.name,
-    hp: Number(tpl.maxHP) || 100,
-    maxHP: Number(tpl.maxHP) || 100,
-    state: "idle",
-    dir: "left",
-    x: Number(tpl.spawnX) || 400,
-    y: Number(tpl.spawnY) || 300,
-    mapId, // ✅ critical fix: make sure monster has mapId
-  };
-
-  // ✅ Replace old monster in state
-  this.state.monsters[newMonster.id] = newMonster;
-
-  // ✅ Data for clients
-  const respawnData = {
-    monsterId: newMonster.id,
-    baseData: newMonster,
-    mapId: newMonster.mapId, // ✅ now correct
-    x: newMonster.x,
-    y: newMonster.y,
-    hp: newMonster.hp,
-    maxHP: newMonster.maxHP,
-    name: newMonster.name,
-    sprites: newMonster.sprites,
-    coins: newMonster.coins,
-    exp: newMonster.exp,
-  };
-
-  console.log(
-    `✅ Respawned ${newMonster.name} (${newMonster.id}) on map ${newMonster.mapId} at (${newMonster.x}, ${newMonster.y})`
-  );
-
-  this.safeBroadcastToMap(newMonster.mapId, "monster_respawn", respawnData);
-}
-
-
-
-
-
-
-
-
-
-
-/* ============================================================
-   📡 Safe Broadcast Utilities (Final, Map-aware)
-   ============================================================ */
-safeBroadcastToMap(mapId, event, data) {
-  let sentCount = 0;
-  for (const c of this.clients) {
-    const p = this.state.players[c.sessionId];
-    if (p && Number(p.mapId) === Number(mapId)) {
-      try {
-        c.send(event, data);
-        sentCount++;
-      } catch (err) {
-        console.warn(`⚠️ Failed to send ${event} to ${c.sessionId}:`, err);
+     📡 Safe Broadcast Utilities
+     ============================================================ */
+  safeBroadcastToMap(mapId, event, data) {
+    for (const c of this.clients) {
+      const p = this.state.players[c.sessionId];
+      if (p?.mapId === mapId) {
+        try {
+          c.send(event, data);
+        } catch (err) {
+          console.warn(`⚠️ Failed to send ${event} to ${c.sessionId}:`, err);
+        }
       }
     }
   }
-  console.log(`📡 Broadcasted "${event}" to map ${mapId} (${sentCount} players)`);
-}
 
-safeBroadcast(event, data) {
-  let sentCount = 0;
-  for (const c of this.clients) {
-    try {
-      c.send(event, data);
-      sentCount++;
-    } catch (err) {
-      console.warn(`⚠️ safeBroadcast failed for ${event}:`, err);
+  safeBroadcast(event, data) {
+    for (const c of this.clients) {
+      try {
+        c.send(event, data);
+      } catch (err) {
+        console.warn(`⚠️ safeBroadcast failed for ${event}:`, err);
+      }
     }
   }
-  console.log(`📡 Broadcasted global "${event}" to ${sentCount} players`);
-}
-
 
   /* ============================================================
      🧹 Room Disposal
