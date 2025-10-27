@@ -486,79 +486,122 @@ this.onMessage("attack_monster", async (client, msg) => {
   }
 
   /* ============================================================
-     ♻️ Safe Monster Respawn (Fixed)
-     ============================================================ */
-  respawnMonsterById(monsterId) {
-  if (!monsterId) return;
+   ♻️ Safe Monster Respawn (Full Stats from Sheet + Auto-map)
+   ============================================================ */
+respawnMonsterById(monsterId) {
+  if (!monsterId) return;
+  console.log("🧩 respawnMonsterById called for", monsterId);
 
-  // ✅ Find clean template
-  let tpl =
-    this._monsterSpawnTemplates?.[monsterId] ||
-    this.monsterTemplates.find((t) => String(t.id) === String(monsterId));
+  if (!this._monsterSpawnTemplates) this._monsterSpawnTemplates = {};
 
-  if (!tpl) {
-    console.warn(`❌ No template found for respawn ${monsterId}`);
-    return;
-  }
+  let tpl =
+    this.monsterTemplates.find((t) => String(t.id) === String(monsterId)) ||
+    this._monsterSpawnTemplates?.[monsterId];
 
-  // ✅ Deep clone template to avoid mutation
-  tpl = JSON.parse(JSON.stringify(tpl));
+  console.log("📜 Respawn template found:", tpl ? "✅ YES" : "❌ NO");
+  if (!tpl) return console.warn(`❌ No respawn template for ${monsterId}`);
 
-  // ✅ Create new monster
-  const newMonster = {
-    id: tpl.id,
-    name: tpl.name,
-    level: tpl.level || 1,
-    maxHP: Number(tpl.maxHP) || 100,
-    hp: Number(tpl.maxHP) || 100,
-    attack: tpl.attack || 10,
-    defense: tpl.defense || 5,
-    mapId: Number(tpl.mapId) || 101,
-    x: Number(tpl.spawnX) || Number(tpl.x) || 400,
-    y: Number(tpl.spawnY) || Number(tpl.y) || 300,
-    sprites: tpl.sprites || {},
-    state: "idle",
-    dir: "left",
-    spawnX: tpl.spawnX ?? tpl.x,
-    spawnY: tpl.spawnY ?? tpl.y,
-    // Add coins and exp back to the object for respawn
-    coins: tpl.coins || 0,
-    exp: tpl.exp || 0,
-  };
+  tpl = JSON.parse(JSON.stringify(tpl));
 
-  // ✅ Replace old monster entry
-  this.state.monsters[newMonster.id] = newMonster;
+  const previous = this.state.monsters?.[monsterId];
+  const mapId =
+    Number(tpl.mapId) ||
+    Number(previous?.mapId) ||
+    Number(tpl.MapID) ||
+    null;
+  if (!mapId) return console.error(`❌ Missing mapId for ${monsterId}`);
 
-  // ✅ Broadcast to players on same map
-  const respawnData = {
-    monsterId: newMonster.id,
-    
-    // 💥 FIX: Send the entire monster object as 'baseData'
-    baseData: newMonster, 
-    
-    name: newMonster.name,
-    mapId: newMonster.mapId,
-    x: newMonster.x,
-    y: newMonster.y,
-    hp: newMonster.hp,
-    maxHP: newMonster.maxHP,
-    sprites: newMonster.sprites,
-    // Include coins and exp for client logic
-    coins: newMonster.coins, 
-    exp: newMonster.exp, 
-  };
+  const spawnX =
+    Number(tpl.spawnX) ||
+    Number(tpl.PositionX) ||
+    Number(previous?.spawnX) ||
+    Number(previous?.x) ||
+    400;
+  const spawnY =
+    Number(tpl.spawnY) ||
+    Number(tpl.PositionY) ||
+    Number(previous?.spawnY) ||
+    Number(previous?.y) ||
+    300;
 
-  // 🧩 Debug info
-  const recipients = this.clients.filter((c) => {
-    const p = this.state.players[c.sessionId];
-    return p && Number(p.mapId) === Number(newMonster.mapId);
-  });
-  console.log(
-    `✅ Respawned ${newMonster.name} (${newMonster.id}) on map ${newMonster.mapId} for ${recipients.length} players`
-  );
+  const newMonster = {
+    id: tpl.id || tpl.MonsterID,
+    name: tpl.name || tpl.Name,
+    class: tpl.class || tpl.Class,
+    level: Number(tpl.level || tpl.Level || 1),
+    maxHP: Number(tpl.maxHP || tpl.BaseHP || 100),
+    hp: Number(tpl.BaseHP || tpl.maxHP || 100),
+    attack: Number(tpl.attack || tpl.Attack || 10),
+    defense: Number(tpl.defense || tpl.Defense || 5),
+    speed: Number(tpl.speed || tpl.Speed || 5),
+    critDamage: Number(tpl.critDamage || tpl.CritDamage || 100),
+    critChance: Number(tpl.critChance || tpl.CritChance || 5),
+    mapId,
+    x: spawnX,
+    y: spawnY,
+    spawnX,
+    spawnY,
+    state: "idle",
+    dir: tpl.Direction || "left",
+    exp: Number(tpl.exp || tpl.Experience || 0),
+    coins: Number(tpl.coins || tpl.Coins || 0),
+    isAggro: tpl.isAggro === "TRUE" || tpl.isAggro === true,
+    skills: [
+      {
+        name: tpl.Skill1_Name,
+        damage: Number(tpl.Skill1_Damage),
+        cooldown: Number(tpl.Skill1_Cooldown),
+        range: Number(tpl.Skill1_Range),
+        animation: tpl.Skill1_AnimationURL,
+      },
+      {
+        name: tpl.Skill2_Name,
+        damage: Number(tpl.Skill2_Damage),
+        cooldown: Number(tpl.Skill2_Cooldown),
+        range: Number(tpl.Skill2_Range),
+        animation: tpl.Skill2_AnimationURL,
+      },
+    ],
+    sprites: {
+      idleLeft: tpl.ImageURL_IdleLeft,
+      idleRight: tpl.ImageURL_IdleRight,
+      walkLeft: tpl.ImageURL_Walk_Left,
+      walkRight: tpl.ImageURL_Walk_Right,
+      attackLeft: tpl.ImageURL_Attack_Left,
+      attackRight: tpl.ImageURL_Attack_Right,
+      dieLeft: tpl.ImageURL_Die_Left,
+      dieRight: tpl.ImageURL_Die_Right,
+    },
+    loot: [
+      { name: tpl.Loot1, chance: Number(tpl.Loot1Chance || 0), image: tpl.Loot1ImageURL },
+      { name: tpl.Loot2, chance: Number(tpl.Loot2Chance || 0), image: tpl.Loot2ImageURL },
+      { name: tpl.Loot3, chance: Number(tpl.Loot3Chance || 0), image: tpl.Loot3ImageURL },
+    ],
+  };
 
-  this.safeBroadcastToMap(newMonster.mapId, "monster_respawn", respawnData);
+  // ✅ Clean old instance before replacing
+  delete this.state.monsters[monsterId];
+  this.state.monsters[newMonster.id] = newMonster;
+
+  const respawnData = {
+    monsterId: newMonster.id,
+    baseData: newMonster,
+    mapId: newMonster.mapId,
+    x: newMonster.x,
+    y: newMonster.y,
+    hp: newMonster.hp,
+    maxHP: newMonster.maxHP,
+    name: newMonster.name,
+    sprites: newMonster.sprites,
+    coins: newMonster.coins,
+    exp: newMonster.exp,
+  };
+
+  this.safeBroadcastToMap(newMonster.mapId, "monster_respawn", respawnData);
+  console.log(`📢 monster_respawn event broadcasted for ${newMonster.id}`);
 }
+
+
 
 
 
