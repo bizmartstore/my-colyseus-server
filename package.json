@@ -1,24 +1,30 @@
 {
   "name": "my-colyseus-server",
   "version": "1.0.0",
-  "description": "MMORPG Colyseus server with Google Sheets monster integration",
+  "description": "MMORPG Colyseus server with multi-map support and Google Sheets integration",
   "main": "src/index.js",
+  "type": "module",
   "scripts": {
-    "start": "node src/index.js"
+    "start": "node src/index.js",
+    "dev": "nodemon src/index.js"
   },
   "keywords": [
     "colyseus",
     "mmorpg",
-    "game",
-    "realtime"
+    "multiplayer",
+    "realtime",
+    "game"
   ],
-  "author": "YourName",
+  "author": "Joey Albert Agnas",
   "license": "ISC",
   "dependencies": {
     "@colyseus/ws-transport": "^0.16.5",
     "colyseus": "^0.16.5",
     "express": "^4.18.2",
-    "node-fetch": "^2.7.0"
+    "node-fetch": "^3.3.2"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.3"
   },
   "engines": {
     "node": ">=18"
