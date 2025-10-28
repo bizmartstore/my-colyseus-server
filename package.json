@@ -3,7 +3,6 @@
   "version": "1.0.0",
   "description": "MMORPG Colyseus server with multi-map support and Google Sheets integration",
   "main": "src/index.js",
-  "type": "module",
   "scripts": {
     "start": "node src/index.js",
     "dev": "nodemon src/index.js"
