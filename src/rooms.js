@@ -337,19 +337,23 @@ this.onMessage("request_players", (client, msg) => {
   } catch (e) {
     console.warn("⚠️ request_players -> client.send failed:", e);
   }
-});
+}); // 👈 closes the onMessage() handler
+
+} // ✅ 👈 THIS closes the async onCreate() method properly!
 
 
-  /* ============================================================
+/* ============================================================
    🧍 Player Join (robust snapshot + broadcast)
    ============================================================ */
 onJoin(client, options) {
   console.log("✨ Player joined:", client.sessionId, options);
 
-  const safeEmail = options.email || `guest_${Math.random().toString(36).substring(2, 8)}@game.local`;
+  const safeEmail =
+    options.email || `guest_${Math.random().toString(36).substring(2, 8)}@game.local`;
   const safeName = options.playerName || "Guest";
   const safeCharacterID = options.CharacterID || "C001";
   const charData = characterDatabase[safeCharacterID] || characterDatabase["C001"];
+
   // Use Number(options.mapId) so types are consistent
   const mapId = Number(options.mapId) || 1;
   const posX = Number(options.x) || 200;
@@ -402,6 +406,7 @@ onJoin(client, options) {
       id: client.sessionId,
       player: this.state.players[client.sessionId],
     });
+
     // Also broadcast the updated snapshot to everyone in the map (ensures consistency)
     const snapshotForAll = {};
     for (const [id, other] of Object.entries(this.state.players)) {
@@ -412,6 +417,7 @@ onJoin(client, options) {
     console.warn("⚠️ onJoin -> broadcast player_joined/players_snapshot failed:", e);
   }
 }
+
 
 
   /* ============================================================
