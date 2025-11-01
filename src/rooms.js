@@ -269,108 +269,150 @@ this.onMessage("attack_monster", async (client, msg) => {
     });
 
     /* ============================================================
-       🗺️ Map Change (No Ghost Duplicates)
-       ============================================================ */
-    this.onMessage("change_map", (client, message) => {
-      const player = this.state.players[client.sessionId];
-      if (!player) return;
+   🗺️ Map Change (No Ghost Duplicates) — robust snapshot & notify
+   ============================================================ */
+this.onMessage("change_map", (client, message) => {
+  const player = this.state.players[client.sessionId];
+  if (!player) return;
 
-      const oldMap = player.mapId;
-      const newMap = Number(message.newMapId) || oldMap;
-      if (newMap === oldMap) return;
+  const oldMap = Number(player.mapId) || 0;
+  const newMap = Number(message.newMapId) || oldMap;
+  if (newMap === oldMap) return;
 
-      console.log(`🌍 ${player.playerName} moved from Map ${oldMap} → ${newMap}`);
-      player.mapId = newMap;
+  console.log(`🌍 ${player.playerName} moved from Map ${oldMap} → ${newMap}`);
 
-      // Remove from old map
-      this.safeBroadcastToMap(oldMap, "player_left", { id: client.sessionId });
+  // Update server-side state first
+  player.mapId = newMap;
 
-      // Add to new map
-      this.safeBroadcastToMap(newMap, "player_joined", {
-        id: client.sessionId,
-        player,
-      });
-
-      // Send fresh snapshot
-      const sameMapPlayers = {};
-      for (const [id, p] of Object.entries(this.state.players)) {
-        if (p.mapId === newMap) sameMapPlayers[id] = p;
-      }
-      client.send("players_snapshot", sameMapPlayers);
-    });
-
-    /* ============================================================
-       📨 Manual Player Snapshot Request
-       ============================================================ */
-    this.onMessage("request_players", (client) => {
-      const requester = this.state.players[client.sessionId];
-      if (!requester) return;
-
-      const sameMapPlayers = {};
-      for (const [id, p] of Object.entries(this.state.players)) {
-        if (p.mapId === requester.mapId) sameMapPlayers[id] = p;
-      }
-      client.send("players_snapshot", sameMapPlayers);
-    });
+  // Notify old map players this player left
+  try {
+    this.safeBroadcastToMap(oldMap, "player_left", { id: client.sessionId });
+  } catch (e) {
+    console.warn("⚠️ safeBroadcastToMap(player_left) failed:", e);
   }
 
-  /* ============================================================
-     🧍 Player Join
-     ============================================================ */
-  onJoin(client, options) {
-    console.log("✨ Player joined:", client.sessionId, options);
-
-    const safeEmail = options.email || `guest_${Math.random().toString(36).substring(2, 8)}@game.local`;
-    const safeName = options.playerName || "Guest";
-    const safeCharacterID = options.CharacterID || "C001";
-    const charData = characterDatabase[safeCharacterID] || characterDatabase["C001"];
-    const mapId = Number(options.mapId) || 1;
-    const posX = Number(options.x) || 200;
-    const posY = Number(options.y) || 200;
-
-    this.state.players[client.sessionId] = {
+  // Notify new map players about the join (basic info)
+  try {
+    this.safeBroadcastToMap(newMap, "player_joined", {
       id: client.sessionId,
-      email: safeEmail,
-      playerName: safeName,
-      CharacterID: safeCharacterID,
-      characterClass: charData.Class,
-      mapId,
-      x: posX,
-      y: posY,
-      dir: options.dir || "down",
-      hp: charData.BaseHP,
-      mp: charData.BaseMana,
-      attack: charData.Attack,
-      defense: charData.Defense,
-      speed: charData.Speed,
-      critDamage: charData.CritDamage,
-      exp: 0,
-      coins: 0,
-      sprites: {
-        idleFront: charData.ImageURL_IdleFront,
-        idleBack: charData.ImageURL_IdleBack,
-        walkLeft: charData.ImageURL_Walk_Left,
-        walkRight: charData.ImageURL_Walk_Right,
-        attackLeft: charData.ImageURL_Attack_Left,
-        attackRight: charData.ImageURL_Attack_Right,
-      },
-    };
+      player,
+    });
+  } catch (e) {
+    console.warn("⚠️ safeBroadcastToMap(player_joined) failed:", e);
+  }
 
-    console.log(`✅ ${safeName} (${safeEmail}) joined Map ${mapId} as ${charData.Class}`);
-
-    // Send snapshot of players in same map
+  // Build and send a fresh snapshot for the new map back to the caller
+  try {
     const sameMapPlayers = {};
-    for (const [id, other] of Object.entries(this.state.players)) {
-      if (other.mapId === mapId) sameMapPlayers[id] = other;
+    for (const [id, p] of Object.entries(this.state.players)) {
+      if (Number(p.mapId) === newMap) sameMapPlayers[id] = p;
     }
     client.send("players_snapshot", sameMapPlayers);
+    // Also proactively broadcast the updated snapshot to everyone in newMap.
+    // This guarantees clients already in the map will see the newcomer immediately.
+    this.safeBroadcastToMap(newMap, "players_snapshot", sameMapPlayers);
+  } catch (e) {
+    console.warn("⚠️ Sending players_snapshot in change_map failed:", e);
+  }
+});
 
-    // Notify others
+
+   /* ============================================================
+   📨 Manual Player Snapshot Request (supports explicit mapId)
+   ============================================================ */
+this.onMessage("request_players", (client, msg) => {
+  const requester = this.state.players[client.sessionId];
+  if (!requester) return;
+
+  // Accept explicit mapId param or fall back to requester's map
+  const targetMap = Number((msg && msg.mapId) || requester.mapId || 0);
+
+  const sameMapPlayers = {};
+  for (const [id, p] of Object.entries(this.state.players)) {
+    if (Number(p.mapId) === targetMap) sameMapPlayers[id] = p;
+  }
+
+  try {
+    client.send("players_snapshot", sameMapPlayers);
+  } catch (e) {
+    console.warn("⚠️ request_players -> client.send failed:", e);
+  }
+});
+
+
+  /* ============================================================
+   🧍 Player Join (robust snapshot + broadcast)
+   ============================================================ */
+onJoin(client, options) {
+  console.log("✨ Player joined:", client.sessionId, options);
+
+  const safeEmail = options.email || `guest_${Math.random().toString(36).substring(2, 8)}@game.local`;
+  const safeName = options.playerName || "Guest";
+  const safeCharacterID = options.CharacterID || "C001";
+  const charData = characterDatabase[safeCharacterID] || characterDatabase["C001"];
+  // Use Number(options.mapId) so types are consistent
+  const mapId = Number(options.mapId) || 1;
+  const posX = Number(options.x) || 200;
+  const posY = Number(options.y) || 200;
+
+  this.state.players[client.sessionId] = {
+    id: client.sessionId,
+    email: safeEmail,
+    playerName: safeName,
+    CharacterID: safeCharacterID,
+    characterClass: charData.Class,
+    mapId,
+    x: posX,
+    y: posY,
+    dir: options.dir || "down",
+    hp: charData.BaseHP,
+    mp: charData.BaseMana,
+    attack: charData.Attack,
+    defense: charData.Defense,
+    speed: charData.Speed,
+    critDamage: charData.CritDamage,
+    exp: 0,
+    coins: 0,
+    sprites: {
+      idleFront: charData.ImageURL_IdleFront,
+      idleBack: charData.ImageURL_IdleBack,
+      walkLeft: charData.ImageURL_Walk_Left,
+      walkRight: charData.ImageURL_Walk_Right,
+      attackLeft: charData.ImageURL_Attack_Left,
+      attackRight: charData.ImageURL_Attack_Right,
+    },
+  };
+
+  console.log(`✅ ${safeName} (${safeEmail}) joined Map ${mapId} as ${charData.Class}`);
+
+  // Send snapshot of players already in same map to the joining client
+  try {
+    const sameMapPlayers = {};
+    for (const [id, other] of Object.entries(this.state.players)) {
+      if (Number(other.mapId) === mapId) sameMapPlayers[id] = other;
+    }
+    client.send("players_snapshot", sameMapPlayers);
+  } catch (e) {
+    console.warn("⚠️ onJoin -> sending players_snapshot failed:", e);
+  }
+
+  // Notify others in the map that this client joined
+  try {
     this.safeBroadcastToMap(mapId, "player_joined", {
       id: client.sessionId,
       player: this.state.players[client.sessionId],
     });
+    // Also broadcast the updated snapshot to everyone in the map (ensures consistency)
+    const snapshotForAll = {};
+    for (const [id, other] of Object.entries(this.state.players)) {
+      if (Number(other.mapId) === mapId) snapshotForAll[id] = other;
+    }
+    this.safeBroadcastToMap(mapId, "players_snapshot", snapshotForAll);
+  } catch (e) {
+    console.warn("⚠️ onJoin -> broadcast player_joined/players_snapshot failed:", e);
   }
+}
+
 
   /* ============================================================
      👋 Player Leave
