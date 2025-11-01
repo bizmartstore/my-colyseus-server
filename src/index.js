@@ -1,5 +1,5 @@
 // ============================================================
-// src/index.js — Colyseus MMORPG Server Entry (Dynamic Map Ready)
+// src/index.js — Colyseus MMORPG Server Entry (Single Room)
 // ============================================================
 
 const http = require("http");
@@ -18,11 +18,10 @@ app.get("/", (req, res) => {
     <h2>🟢 Colyseus MMORPG Server is Running</h2>
     <p>Health OK ✅</p>
     <p>WebSocket endpoint: <code>wss://${req.headers.host}</code></p>
-    <p>Dynamic Rooms Enabled: <strong>mmorpg_room_[MapID]</strong></p>
+    <p>Active Room: <strong>mmorpg_room</strong></p>
   `);
 });
 
-// Optional: quick endpoint to check number of connected clients
 app.get("/status", (req, res) => {
   const rooms = gameServer?.matchMaker?.rooms || {};
   const roomData = Object.entries(rooms).map(([id, room]) => ({
@@ -41,31 +40,20 @@ const server = http.createServer(app);
 const gameServer = new Server({
   transport: new WebSocketTransport({
     server,
-    pingInterval: 4000, // keeps idle sockets alive
-    pingMaxRetries: 5,  // after 5 missed pings, disconnect
+    pingInterval: 4000,
+    pingMaxRetries: 5,
   }),
-  seatReservationTime: 60, // seconds to allow reconnect
+  seatReservationTime: 60,
 });
 
 /* ============================================================
-   🌍 Dynamic MMORPG Rooms (No Hardcoding Needed)
+   🌍 Define a Single Room ("mmorpg_room")
    ============================================================ */
 try {
-  // ✅ Modern Colyseus (v0.15+) supports defineMatcher()
-  if (typeof gameServer.defineMatcher === "function") {
-    gameServer.defineMatcher(/^mmorpg_room_\d+$/, MMORPGRoom);
-    console.log("🌍 Dynamic room matcher active: mmorpg_room_<mapId>");
-  } else {
-    // 🧩 Fallback for older Colyseus versions
-    console.log("⚙️ Fallback: defineMatcher not supported — using pre-defined room list.");
-    const maxMapId = 2000; // Supports up to 2000 maps dynamically
-    for (let id = 1; id <= maxMapId; id++) {
-      gameServer.define(`mmorpg_room_${id}`, MMORPGRoom);
-    }
-    console.log(`🌍 Defined MMORPG rooms for MapIDs 1–${maxMapId}`);
-  }
+  gameServer.define("mmorpg_room", MMORPGRoom);
+  console.log("🌍 Registered Colyseus room: mmorpg_room");
 } catch (err) {
-  console.error("❌ Failed to setup dynamic rooms:", err);
+  console.error("❌ Failed to register mmorpg_room:", err);
 }
 
 /* ============================================================
@@ -78,8 +66,7 @@ server.listen(PORT, () => {
   console.log(`🌐 Health check: https://mmorpg-colyseus-server-0u0g.onrender.com/`);
   console.log(`🔗 WebSocket: wss://mmorpg-colyseus-server-0u0g.onrender.com`);
   console.log("-----------------------------------------------------------");
-  console.log("💡 Dynamic map rooms enabled: mmorpg_room_<mapId>");
-  console.log("   Each map now has its own synchronized Colyseus room.");
+  console.log("💡 Single shared room enabled: mmorpg_room");
   console.log("-----------------------------------------------------------");
 });
 
