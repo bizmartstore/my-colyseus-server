@@ -453,9 +453,11 @@ spawnMonsters() {
 
 updateMonsterMovement() {
   try {
-    const lightMonsters = [];
+    // Group monsters by map
+    const monstersByMap = {};
+
     for (const m of Object.values(this.state.monsters)) {
-      if (!m || m.hp <= 0) continue; // Skip dead monsters
+      if (!m || m.hp <= 0) continue;
 
       // Random wandering
       if (Math.random() < 0.5) {
@@ -466,8 +468,8 @@ updateMonsterMovement() {
         m.state = "idle";
       }
 
-      // Prepare lightweight update packet
-      lightMonsters.push({
+      if (!monstersByMap[m.mapId]) monstersByMap[m.mapId] = [];
+      monstersByMap[m.mapId].push({
         id: m.id,
         x: m.x,
         y: m.y,
@@ -478,9 +480,11 @@ updateMonsterMovement() {
       });
     }
 
-    // Broadcast movement updates to all maps
-    if (lightMonsters.length > 0) {
-      this.safeBroadcast("monsters_update", lightMonsters);
+    // ✅ Send monsters only to players on the same map
+    for (const [mapId, monsterList] of Object.entries(monstersByMap)) {
+      if (monsterList.length > 0) {
+        this.safeBroadcastToMap(Number(mapId), "monsters_update", monsterList);
+      }
     }
   } catch (err) {
     console.error("⚠️ updateMonsterMovement failed:", err);
