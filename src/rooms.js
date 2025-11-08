@@ -252,21 +252,26 @@ this.onMessage("attack_monster", async (client, msg) => {
     /* ============================================================
        💬 Chat System (Map-based)
        ============================================================ */
-    this.onMessage("chat", (client, message) => {
-      const player = this.state.players[client.sessionId];
-      if (!player || !message.text) return;
+    this.onMessage("chat", (client, msg) => {
+  const player = this.state.players[client.sessionId];
+  if (!player) return;
 
-      const chatPayload = {
-        sender: player.email,
-        name: player.playerName,
-        text: String(message.text).substring(0, 300),
-        mapId: player.mapId,
-        ts: Date.now(),
-      };
+  const text = (msg?.text || "").toString().trim();
+  if (!text) return;
 
-      console.log(`💬 [CHAT] ${player.playerName}@Map${player.mapId}: ${chatPayload.text}`);
-      this.safeBroadcastToMap(player.mapId, "chat", chatPayload);
-    });
+  const chatPayload = {
+    sender: player.email,
+    name: player.playerName,
+    text: text.slice(0, 200),
+    mapId: player.mapId,
+    timestamp: Date.now()
+  };
+
+  console.log(`💬 [CHAT] ${player.playerName}@Map${player.mapId}: ${chatPayload.text}`);
+
+  // ✅ same map only
+  this.safeBroadcastToMap(player.mapId, "chat", chatPayload);
+});
 
     /* ============================================================
    🗺️ Map Change (No Ghost Duplicates) — robust snapshot & notify
