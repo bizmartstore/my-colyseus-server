@@ -130,7 +130,7 @@ exports.MMORPGRoom = class MMORPGRoom extends Room {
         }
 
         if (!pdata) {
-            pdata = {}; // Fallback defaults
+            pdata = {}; // fallback defaults
         }
 
         const player = new Player({
@@ -173,7 +173,6 @@ exports.MMORPGRoom = class MMORPGRoom extends Room {
         });
 
         this.state.players.set(client.sessionId, player);
-
         console.log(`✅ Player initialized: ${player.name}`);
     }
 
