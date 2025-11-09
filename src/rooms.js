@@ -23,11 +23,11 @@ if (process.env.GOOGLE_SERVICE_ACCOUNT) {
     console.warn("⚠️ GOOGLE_SERVICE_ACCOUNT env variable is not set. Sheet data will be unavailable.");
 }
 
-// ====================== PlayerRoom ======================
-exports.PlayerRoom = class PlayerRoom extends Room {
+// ====================== MMORPGRoom ======================
+exports.MMORPGRoom = class MMORPGRoom extends Room {
 
     onCreate(options) {
-        console.log("PlayerRoom created");
+        console.log("MMORPGRoom created");
 
         // Room state
         this.setState({
@@ -158,6 +158,6 @@ exports.PlayerRoom = class PlayerRoom extends Room {
     }
 
     onDispose() {
-        console.log("Disposing PlayerRoom");
+        console.log("Disposing MMORPGRoom");
     }
 };
