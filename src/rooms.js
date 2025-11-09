@@ -1,7 +1,8 @@
 // ============================================================
-// src/rooms.js — Colyseus MMORPG Room Logic
+// src/rooms.js — Colyseus MMORPG Room Logic (Final Fixed)
 // ============================================================
-const { Room, Client } = require("colyseus");
+
+const { Room } = require("colyseus");
 const { Schema, type, MapSchema } = require("@colyseus/schema");
 
 // ============================================================
@@ -56,53 +57,68 @@ class MMORPGRoom extends Room {
 
     console.log("🟢 MMORPGRoom created");
 
-    // Broadcast loop (20 times per second)
-    this.setSimulationInterval((deltaTime) => {
+    // Broadcast updates (20 times per second)
+    this.setSimulationInterval(() => {
       this.broadcastPatch();
     }, 50);
 
-    // Handle player inputs
+    // ============================================================
+    // 🧭 Player Movement
+    // ============================================================
     this.onMessage("move", (client, data) => {
       const player = this.state.players.get(client.sessionId);
       if (!player) return;
 
-      player.x = data.x ?? player.x;
-      player.y = data.y ?? player.y;
-      player.animation = data.animation ?? player.animation;
-      player.mapID = data.mapID ?? player.mapID;
+      if (typeof data.x === "number") player.x = data.x;
+      if (typeof data.y === "number") player.y = data.y;
+      if (typeof data.animation === "string") player.animation = data.animation;
+      if (typeof data.mapID === "number") player.mapID = data.mapID;
     });
 
+    // ============================================================
+    // ⚔️ Player Attack
+    // ============================================================
     this.onMessage("attack", (client, data) => {
       const player = this.state.players.get(client.sessionId);
       if (!player) return;
 
-      // Broadcast attack animation to all players
       this.broadcast("attack_event", {
         attackerId: client.sessionId,
-        direction: data.direction,
-        skillName: data.skillName,
-        damage: data.damage,
-        crit: data.crit,
+        direction: data.direction || "right",
+        skillName: data.skillName || "Basic Attack",
+        damage: data.damage || 0,
+        crit: data.crit || false,
         mapID: player.mapID,
       });
     });
 
+    // ============================================================
+    // 💬 Chat System
+    // ============================================================
     this.onMessage("chat", (client, msg) => {
       const player = this.state.players.get(client.sessionId);
       if (!player) return;
+
+      const text = msg?.text?.toString().trim() || "";
+      if (text.length === 0) return;
+
       this.broadcast("chat_message", {
         sender: player.name,
-        text: msg.text || "",
+        text,
         mapID: player.mapID,
       });
     });
   }
 
+  // ============================================================
+  // 👋 On Player Join
+  // ============================================================
   onJoin(client, options) {
     const p = options.playerData || {};
     console.log(`👋 ${p.Email || "Unknown"} joined the room`);
 
     const newPlayer = new Player();
+
     newPlayer.email = p.Email || client.sessionId;
     newPlayer.name = p.PlayerName || "Guest";
     newPlayer.characterID = p.CharacterID || "C000";
@@ -137,7 +153,7 @@ class MMORPGRoom extends Room {
 
     client.send("joined", {
       sessionId: client.sessionId,
-      message: "Welcome to MMORPG Room!",
+      message: "✅ Welcome to MMORPG Room!",
       currentMap: newPlayer.mapID,
     });
 
@@ -148,6 +164,9 @@ class MMORPGRoom extends Room {
     });
   }
 
+  // ============================================================
+  // 🚪 On Player Leave
+  // ============================================================
   onLeave(client, consented) {
     const player = this.state.players.get(client.sessionId);
     if (player) {
@@ -157,6 +176,9 @@ class MMORPGRoom extends Room {
     }
   }
 
+  // ============================================================
+  // 🧹 Room Dispose
+  // ============================================================
   onDispose() {
     console.log("🧹 MMORPGRoom disposed.");
   }
