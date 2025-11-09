@@ -1,5 +1,5 @@
 // ============================================================
-// src/rooms.js — MMORPG Room Definition (Schema Version)
+// src/rooms.js — MMORPG Room Definition (Final Fixed Version)
 // ============================================================
 
 const { Room } = require("colyseus");
@@ -61,7 +61,7 @@ schema.defineTypes(Player, {
     maxExp: "number",
     speed: "number",
 
-    images: { map: "string" } // simple map of image URLs
+    images: { map: "string" } // map of image URLs
 });
 
 /* ====================== State ====================== */
@@ -83,7 +83,7 @@ exports.MMORPGRoom = class MMORPGRoom extends Room {
 
         this.setState(new State());
 
-        /* ====================== Movement Sync ====================== */
+        // ----------------- Movement Sync -----------------
         this.onMessage("move", (client, data) => {
             const p = this.state.players.get(client.sessionId);
             if (!p) return;
@@ -97,7 +97,7 @@ exports.MMORPGRoom = class MMORPGRoom extends Room {
             p.MapID = data.MapID ?? p.MapID;
         });
 
-        /* ====================== Attack Sync ====================== */
+        // ----------------- Attack Sync -----------------
         this.onMessage("attack", (client, data) => {
             const p = this.state.players.get(client.sessionId);
             if (!p) return;
@@ -129,9 +129,7 @@ exports.MMORPGRoom = class MMORPGRoom extends Room {
             }
         }
 
-        if (!pdata) {
-            pdata = {}; // fallback defaults
-        }
+        if (!pdata) pdata = {}; // fallback defaults
 
         const player = new Player({
             id: pdata.CharacterID || client.sessionId,
@@ -185,7 +183,7 @@ exports.MMORPGRoom = class MMORPGRoom extends Room {
         console.log("❌ Disposing MMORPGRoom");
     }
 
-    /* ====================== Google Sheets Loader ====================== */
+    // ----------------- Google Sheets Loader -----------------
     async loadPlayerData(email) {
         if (!sheets) return null;
 
