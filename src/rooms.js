@@ -5,10 +5,10 @@
 const { Room } = require("colyseus");
 const { google } = require("googleapis"); // For Google Sheets API
 
-// Utility function to fetch player data from Google Sheets
+// ====================== Google Sheets Helper ======================
 async function fetchPlayerData(email) {
   const sheets = google.sheets({ version: "v4" });
-  const SPREADSHEET_ID = process.env.PLAYERDATA_SHEET_ID;
+  const SPREADSHEET_ID = "1U3MFNEf7G32Gs10Z0s0NoiZ6PPP1TgsEVbRUFcmjr7Y"; // <-- Your Sheet ID
 
   // Fetch all player data
   const res = await sheets.spreadsheets.values.get({
@@ -32,11 +32,9 @@ async function fetchPlayerData(email) {
     "ImageURL_Walk_Up","ImageURL_Walk_Down"
   ];
 
-  // Find the player row by email
   const row = rows.find(r => r[0] === email);
   if (!row) return null;
 
-  // Map headers to values dynamically
   const playerData = {};
   headers.forEach((key, i) => {
     playerData[key] = row[i] || null;
@@ -45,6 +43,9 @@ async function fetchPlayerData(email) {
   return playerData;
 }
 
+// ============================================================
+// MMORPGRoom Definition
+// ============================================================
 class MMORPGRoom extends Room {
   onCreate(options) {
     console.log("🌍 MMORPGRoom created", options);
@@ -59,7 +60,10 @@ class MMORPGRoom extends Room {
 
       player.PositionX = data.x;
       player.PositionY = data.y;
-      player.MovementAnimation = data.animation;
+      player.MovementAnimation = data.animation || player.MovementAnimation;
+      player.lastDir = data.lastDir || player.lastDir;
+      player.moving = data.moving || false;
+      player.attacking = data.attacking || false;
     });
 
     // Attack / skill handler
