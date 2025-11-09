@@ -21,7 +21,7 @@ exports.PlayerRoom = class PlayerRoom extends Room {
 
         // Room state
         this.setState({
-            players: {},  // all connected players
+            players: {}  // all connected players
         });
 
         // Movement sync
@@ -61,7 +61,13 @@ exports.PlayerRoom = class PlayerRoom extends Room {
             return;
         }
 
-        const pdata = await this.loadPlayerData(options.email);
+        let pdata = null;
+        try {
+            pdata = await this.loadPlayerData(options.email);
+        } catch (err) {
+            console.error("Error loading player data:", err);
+        }
+
         if (!pdata) {
             console.log("No data found for player:", options.email);
             client.leave();
@@ -70,9 +76,9 @@ exports.PlayerRoom = class PlayerRoom extends Room {
 
         // Initialize player state
         this.state.players[client.sessionId] = {
-            id: pdata.CharacterID,
-            name: pdata.CharacterName,
-            class: pdata.CharacterClass,
+            id: pdata.CharacterID || client.sessionId,
+            name: pdata.CharacterName || "Unknown",
+            class: pdata.CharacterClass || "Adventurer",
             x: parseFloat(pdata.PositionX) || 0,
             y: parseFloat(pdata.PositionY) || 0,
             MapID: pdata.MapID || 101,
@@ -81,7 +87,7 @@ exports.PlayerRoom = class PlayerRoom extends Room {
             moving: false,
             lastDir: pdata.MovementAnimation || "IdleFront",
             attacking: false,
-            attackAnimation: pdata.ImageURL_Attack_Right || pdata.ImageURL_Attack_Left,
+            attackAnimation: pdata.ImageURL_Attack_Right || pdata.ImageURL_Attack_Left || "",
             hp: parseInt(pdata.CurrentHP) || 100,
             maxHp: parseInt(pdata.MaxHP) || 100,
             mana: parseInt(pdata.CurrentMana) || 100,
@@ -130,6 +136,7 @@ exports.PlayerRoom = class PlayerRoom extends Room {
                 row.forEach((val, i) => { if (keys[i]) obj[keys[i]] = val; });
                 if (obj.Email === email) return obj;
             }
+
             return null;
 
         } catch (err) {
