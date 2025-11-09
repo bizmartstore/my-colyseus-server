@@ -20,7 +20,10 @@ class Player extends Schema {
     this.x = 0;
     this.y = 0;
     this.animation = "IdleFront";
-    this.mapID = 101;
+    this.direction = "down";
+    this.moving = false;
+    this.attacking = false;
+    this.mapID = 1; // 🔥 unified map for everyone
 
     this.currentHP = 100;
     this.maxHP = 100;
@@ -53,6 +56,9 @@ defineTypes(Player, {
   x: "number",
   y: "number",
   animation: "string",
+  direction: "string",
+  moving: "boolean",
+  attacking: "boolean",
   mapID: "number",
 
   currentHP: "number",
@@ -98,26 +104,24 @@ class MMORPGRoom extends Room {
 
     console.log("🟢 MMORPGRoom created");
 
-    // Broadcast updates (20 times per second)
-    this.setSimulationInterval(() => {
-      this.broadcastPatch();
-    }, 50);
-
     // ============================================================
-    // 🧭 Player Movement
+    // 🧭 Player Movement Handler
     // ============================================================
     this.onMessage("move", (client, data) => {
       const player = this.state.players.get(client.sessionId);
       if (!player) return;
 
+      // Apply movement data
       if (typeof data.x === "number") player.x = data.x;
       if (typeof data.y === "number") player.y = data.y;
-      if (typeof data.animation === "string") player.animation = data.animation;
-      if (typeof data.mapID === "number") player.mapID = data.mapID;
+      if (typeof data.direction === "string") player.direction = data.direction;
+      if (typeof data.moving === "boolean") player.moving = data.moving;
+      if (typeof data.attacking === "boolean") player.attacking = data.attacking;
+      if (typeof data.mapID === "number") player.mapID = 1; // force unified map
     });
 
     // ============================================================
-    // ⚔️ Player Attack
+    // ⚔️ Player Attack Broadcast
     // ============================================================
     this.onMessage("attack", (client, data) => {
       const player = this.state.players.get(client.sessionId);
@@ -149,14 +153,21 @@ class MMORPGRoom extends Room {
         mapID: player.mapID,
       });
     });
+
+    // ============================================================
+    // 🧩 Sync Interval (20 FPS)
+    // ============================================================
+    this.setSimulationInterval(() => {
+      this.broadcastPatch();
+    }, 50);
   }
 
   // ============================================================
   // 👋 On Player Join
   // ============================================================
   onJoin(client, options) {
-    const p = options.playerData || {};
-    console.log(`👋 ${p.Email || "Unknown"} joined the room`);
+    const p = options.player || options.playerData || {};
+    console.log(`👋 ${p.Email || "Unknown"} joined the MMORPG room.`);
 
     const newPlayer = new Player();
 
@@ -169,7 +180,7 @@ class MMORPGRoom extends Room {
     newPlayer.x = Number(p.PositionX) || 300;
     newPlayer.y = Number(p.PositionY) || 200;
     newPlayer.animation = p.MovementAnimation || "IdleFront";
-    newPlayer.mapID = Number(p.MapID) || 101;
+    newPlayer.mapID = 1; // ✅ Everyone shares same map
 
     newPlayer.currentHP = Number(p.CurrentHP) || 100;
     newPlayer.maxHP = Number(p.MaxHP) || 100;
@@ -181,6 +192,7 @@ class MMORPGRoom extends Room {
     newPlayer.critDamage = Number(p.CritDamage) || 100;
     newPlayer.level = Number(p.Level) || 1;
 
+    // ✅ Sprite URLs
     newPlayer.idleFront = p.ImageURL_IdleFront || "";
     newPlayer.idleBack = p.ImageURL_IdleBack || "";
     newPlayer.walkLeft = p.ImageURL_Walk_Left || "";
@@ -218,7 +230,7 @@ class MMORPGRoom extends Room {
   }
 
   // ============================================================
-  // 🧹 Room Dispose
+  // 🧹 On Room Dispose
   // ============================================================
   onDispose() {
     console.log("🧹 MMORPGRoom disposed.");
