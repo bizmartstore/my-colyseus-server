@@ -1,51 +1,92 @@
 // ============================================================
-// src/rooms.js — Colyseus MMORPG Room Logic (Final Fixed)
+// src/rooms.js — Colyseus MMORPG Room Logic (Node Compatible)
 // ============================================================
 
 const { Room } = require("colyseus");
-const { Schema, type, MapSchema } = require("@colyseus/schema");
+const { Schema, MapSchema, defineTypes } = require("@colyseus/schema");
 
 // ============================================================
 // 📦 Player Schema
 // ============================================================
 class Player extends Schema {
-  @type("string") email;
-  @type("string") name;
-  @type("string") characterID;
-  @type("string") characterName;
-  @type("string") characterClass;
+  constructor() {
+    super();
+    this.email = "";
+    this.name = "";
+    this.characterID = "";
+    this.characterName = "";
+    this.characterClass = "";
 
-  @type("number") x;
-  @type("number") y;
-  @type("string") animation;
-  @type("number") mapID;
+    this.x = 0;
+    this.y = 0;
+    this.animation = "IdleFront";
+    this.mapID = 101;
 
-  @type("number") currentHP;
-  @type("number") maxHP;
-  @type("number") currentMana;
-  @type("number") maxMana;
-  @type("number") attack;
-  @type("number") defense;
-  @type("number") speed;
-  @type("number") critDamage;
-  @type("number") level;
+    this.currentHP = 100;
+    this.maxHP = 100;
+    this.currentMana = 100;
+    this.maxMana = 100;
+    this.attack = 10;
+    this.defense = 5;
+    this.speed = 8;
+    this.critDamage = 100;
+    this.level = 1;
 
-  @type("string") idleFront;
-  @type("string") idleBack;
-  @type("string") walkLeft;
-  @type("string") walkRight;
-  @type("string") walkUp;
-  @type("string") walkDown;
-  @type("string") attackLeft;
-  @type("string") attackRight;
+    this.idleFront = "";
+    this.idleBack = "";
+    this.walkLeft = "";
+    this.walkRight = "";
+    this.walkUp = "";
+    this.walkDown = "";
+    this.attackLeft = "";
+    this.attackRight = "";
+  }
 }
+
+defineTypes(Player, {
+  email: "string",
+  name: "string",
+  characterID: "string",
+  characterName: "string",
+  characterClass: "string",
+
+  x: "number",
+  y: "number",
+  animation: "string",
+  mapID: "number",
+
+  currentHP: "number",
+  maxHP: "number",
+  currentMana: "number",
+  maxMana: "number",
+  attack: "number",
+  defense: "number",
+  speed: "number",
+  critDamage: "number",
+  level: "number",
+
+  idleFront: "string",
+  idleBack: "string",
+  walkLeft: "string",
+  walkRight: "string",
+  walkUp: "string",
+  walkDown: "string",
+  attackLeft: "string",
+  attackRight: "string",
+});
 
 // ============================================================
 // 🌍 Game State Schema
 // ============================================================
 class State extends Schema {
-  @type({ map: Player }) players = new MapSchema();
+  constructor() {
+    super();
+    this.players = new MapSchema();
+  }
 }
+defineTypes(State, {
+  players: { map: Player },
+});
 
 // ============================================================
 // 🎮 MMORPG Room
@@ -99,7 +140,7 @@ class MMORPGRoom extends Room {
       const player = this.state.players.get(client.sessionId);
       if (!player) return;
 
-      const text = msg?.text?.toString().trim() || "";
+      const text = (msg?.text || "").toString().trim();
       if (text.length === 0) return;
 
       this.broadcast("chat_message", {
@@ -167,7 +208,7 @@ class MMORPGRoom extends Room {
   // ============================================================
   // 🚪 On Player Leave
   // ============================================================
-  onLeave(client, consented) {
+  onLeave(client) {
     const player = this.state.players.get(client.sessionId);
     if (player) {
       console.log(`❌ ${player.name} left the room`);
