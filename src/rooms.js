@@ -1,123 +1,58 @@
-// ============================================================
-// src/rooms.js — Colyseus MMORPG Room Definition
-// ============================================================
+const { Room, Schema, type, MapSchema } = require("colyseus");
 
-const { Room } = require("colyseus");
-const { google } = require("googleapis"); // For Google Sheets API
-
-// ====================== Google Sheets Helper ======================
-async function fetchPlayerData(email) {
-  const sheets = google.sheets({ version: "v4" });
-  const SPREADSHEET_ID = "1U3MFNEf7G32Gs10Z0s0NoiZ6PPP1TgsEVbRUFcmjr7Y"; // <-- Your Sheet ID
-
-  // Fetch all player data
-  const res = await sheets.spreadsheets.values.get({
-    spreadsheetId: SPREADSHEET_ID,
-    range: "PlayerData!A2:AZ", // Adjust range as needed
-  });
-
-  const rows = res.data.values || [];
-  const headers = [
-    "Email","PlayerName","CharacterID","CharacterName","CharacterClass",
-    "PositionX","PositionY","MovementAnimation","MapID",
-    "CurrentHP","MaxHP","CurrentMana","MaxMana","Attack","Defense",
-    "Speed","CritDamage","CurrentEXP","MaxEXP","Level","StatPointsAvailable",
-    "LevelUpsPending","Skill1_Name","Skill1_Damage","Skill1_Cooldown","Skill1_Image",
-    "Skill1_Range","Skill1_AnimationURL","Skill2_Name","Skill2_Damage",
-    "Skill2_Cooldown","Skill2_Image","Skill2_Range","Skill2_AnimationURL",
-    "Skill3_Name","Skill3_Damage","Skill3_Cooldown","Skill3_Image","Skill3_Range",
-    "Skill3_AnimationURL","PeerID","Coins","Grade","Section",
-    "ImageURL_Attack_Left","ImageURL_Attack_Right","FullName","ImageURL_IdleFront",
-    "ImageURL_IdleBack","ImageURL_Walk_Left","ImageURL_Walk_Right",
-    "ImageURL_Walk_Up","ImageURL_Walk_Down"
-  ];
-
-  const row = rows.find(r => r[0] === email);
-  if (!row) return null;
-
-  const playerData = {};
-  headers.forEach((key, i) => {
-    playerData[key] = row[i] || null;
-  });
-
-  return playerData;
+class Player extends Schema {
+  @type("string") Email = "";
+  @type("string") PlayerName = "";
+  @type("string") CharacterID = "";
+  @type("string") CharacterName = "";
+  @type("string") CharacterClass = "";
+  @type("number") PositionX = 0;
+  @type("number") PositionY = 0;
+  @type("string") MovementAnimation = "IdleFront";
 }
 
-// ============================================================
-// MMORPGRoom Definition
-// ============================================================
-class MMORPGRoom extends Room {
+class MMORPGRoomState extends Schema {
+  @type({ map: Player }) players = new MapSchema();
+}
+
+exports.MMORPGRoom = class MMORPGRoom extends Room {
   onCreate(options) {
-    console.log("🌍 MMORPGRoom created", options);
+    console.log("🌍 MMORPGRoom created!");
 
-    // Store all connected players
-    this.setState({ players: {} });
+    this.setState(new MMORPGRoomState());
 
-    // Movement handler
+    this.onMessage("join", (client, data) => {
+      if (!this.state.players[client.sessionId]) {
+        const p = new Player();
+        Object.assign(p, data);
+        this.state.players[client.sessionId] = p;
+        console.log(`✅ Player joined: ${p.PlayerName}`);
+      }
+    });
+
     this.onMessage("move", (client, data) => {
       const player = this.state.players[client.sessionId];
       if (!player) return;
 
       player.PositionX = data.x;
       player.PositionY = data.y;
-      player.MovementAnimation = data.animation || player.MovementAnimation;
-      player.lastDir = data.lastDir || player.lastDir;
-      player.moving = data.moving || false;
-      player.attacking = data.attacking || false;
+      player.MovementAnimation = data.anim; // e.g., "WalkLeft", "IdleFront"
     });
 
-    // Attack / skill handler
     this.onMessage("attack", (client, data) => {
-      const attacker = this.state.players[client.sessionId];
-      if (!attacker) return;
+      const player = this.state.players[client.sessionId];
+      if (!player) return;
 
-      const target = Object.values(this.state.players).find(p => p.Email === data.targetEmail);
-      if (!target) return;
-
-      const damage = data.skillDamage || attacker.Attack;
-      target.CurrentHP -= damage;
-      if (target.CurrentHP < 0) target.CurrentHP = 0;
-
-      this.broadcast("attackEvent", {
-        attacker: attacker.Email,
-        target: target.Email,
-        skill: data.skillName,
-        damage
-      });
+      player.MovementAnimation = `Attack_${data.direction}`; // "Attack_Left", "Attack_Right" etc.
     });
-
-    // Periodic broadcast for smooth movement
-    this.clock.setInterval(() => {
-      this.broadcast("updatePlayers", this.state.players);
-    }, 200);
   }
 
-  async onJoin(client, options) {
-    console.log(`🟢 Player joined: ${client.sessionId}`, options);
-
-    // Dynamically fetch player data by email
-    const player = await fetchPlayerData(options.email);
-    if (!player) {
-      console.warn(`⚠️ Player data not found for email: ${options.email}`);
-      return;
-    }
-
-    // Add player to room state
-    this.state.players[client.sessionId] = player;
-
-    // Notify others
-    this.broadcast("playerJoined", player);
+  onJoin(client, options) {
+    console.log(`🔑 Player connected: ${client.sessionId}`);
   }
 
   onLeave(client, consented) {
-    console.log(`🔴 Player left: ${client.sessionId}`);
+    console.log(`❌ Player left: ${client.sessionId}`);
     delete this.state.players[client.sessionId];
-    this.broadcast("playerLeft", client.sessionId);
   }
-
-  onDispose() {
-    console.log("🗑️ MMORPGRoom disposed");
-  }
-}
-
-module.exports = { MMORPGRoom };
+};
