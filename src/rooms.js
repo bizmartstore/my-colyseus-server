@@ -5,20 +5,23 @@ const { google } = require("googleapis");
 const SHEET_ID = "1U3MFNEf7G32Gs10Z0s0NoiZ6PPP1TgsEVbRUFcmjr7Y";
 const SHEET_RANGE = "PlayerData!A2:Z"; // adjust if necessary
 
+// Use environment variable for Render deployment
 const auth = new google.auth.GoogleAuth({
-    keyFile: "service-account.json", // your service account json
+    credentials: JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT),
     scopes: ["https://www.googleapis.com/auth/spreadsheets.readonly"]
 });
+
 const sheets = google.sheets({ version: "v4", auth });
 
-// ====================== Room ======================
+// ====================== PlayerRoom ======================
 exports.PlayerRoom = class PlayerRoom extends Room {
 
     onCreate(options) {
         console.log("PlayerRoom created");
 
+        // Room state
         this.setState({
-            players: {}, // all connected players
+            players: {},  // all connected players
         });
 
         // Movement sync
@@ -26,13 +29,13 @@ exports.PlayerRoom = class PlayerRoom extends Room {
             const p = this.state.players[client.sessionId];
             if (!p) return;
 
-            p.x = data.x;
-            p.y = data.y;
-            p.vx = data.vx;
-            p.vy = data.vy;
-            p.moving = data.moving;
-            p.lastDir = data.lastDir;
-            p.MapID = data.MapID;
+            p.x = parseFloat(data.x) || p.x;
+            p.y = parseFloat(data.y) || p.y;
+            p.vx = parseFloat(data.vx) || 0;
+            p.vy = parseFloat(data.vy) || 0;
+            p.moving = !!data.moving;
+            p.lastDir = data.lastDir || p.lastDir;
+            p.MapID = data.MapID || p.MapID;
         });
 
         // Attack sync
@@ -41,7 +44,8 @@ exports.PlayerRoom = class PlayerRoom extends Room {
             if (!p) return;
 
             p.attacking = true;
-            p.attackAnimation = data.attackAnimation; // e.g., left/right URL
+            p.attackAnimation = data.attackAnimation || p.attackAnimation;
+
             setTimeout(() => {
                 if (p) p.attacking = false;
             }, 400);
@@ -51,10 +55,16 @@ exports.PlayerRoom = class PlayerRoom extends Room {
     async onJoin(client, options) {
         console.log("Client joined:", client.sessionId);
 
-        // Load player data from Google Sheet
+        if (!options.email) {
+            console.log("Missing email in options for client:", client.sessionId);
+            client.leave();
+            return;
+        }
+
         const pdata = await this.loadPlayerData(options.email);
         if (!pdata) {
-            console.log("No data for player:", options.email);
+            console.log("No data found for player:", options.email);
+            client.leave();
             return;
         }
 
@@ -81,16 +91,18 @@ exports.PlayerRoom = class PlayerRoom extends Room {
             maxExp: parseInt(pdata.MaxEXP) || 100,
             speed: parseInt(pdata.Speed) || 5,
             images: {
-                idleFront: pdata.ImageURL_IdleFront,
-                idleBack: pdata.ImageURL_IdleBack,
-                walkLeft: pdata.ImageURL_Walk_Left,
-                walkRight: pdata.ImageURL_Walk_Right,
-                walkUp: pdata.ImageURL_Walk_Up,
-                walkDown: pdata.ImageURL_Walk_Down,
-                attackLeft: pdata.ImageURL_Attack_Left,
-                attackRight: pdata.ImageURL_Attack_Right
+                idleFront: pdata.ImageURL_IdleFront || "",
+                idleBack: pdata.ImageURL_IdleBack || "",
+                walkLeft: pdata.ImageURL_Walk_Left || "",
+                walkRight: pdata.ImageURL_Walk_Right || "",
+                walkUp: pdata.ImageURL_Walk_Up || "",
+                walkDown: pdata.ImageURL_Walk_Down || "",
+                attackLeft: pdata.ImageURL_Attack_Left || "",
+                attackRight: pdata.ImageURL_Attack_Right || ""
             }
         };
+
+        console.log(`Player ${pdata.CharacterName} initialized.`);
     }
 
     async loadPlayerData(email) {
@@ -103,12 +115,19 @@ exports.PlayerRoom = class PlayerRoom extends Room {
             const rows = res.data.values;
             if (!rows || rows.length === 0) return null;
 
-            // Map sheet columns to keys
-            const keys = ["Email","PlayerName","CharacterID","CharacterName","CharacterClass","PositionX","PositionY","MovementAnimation","MapID","CurrentHP","MaxHP","CurrentMana","MaxMana","Attack","Defense","Speed","CritDamage","CurrentEXP","MaxEXP","Level","StatPointsAvailable","LevelUpsPending","Skill1_Name","Skill1_Damage","Skill1_Cooldown","Skill1_Image","Skill1_Range","Skill1_AnimationURL","Skill2_Name","Skill2_Damage","Skill2_Cooldown","Skill2_Image","Skill2_Range","Skill2_AnimationURL","Skill3_Name","Skill3_Damage","Skill3_Cooldown","Skill3_Image","Skill3_Range","Skill3_AnimationURL","PeerID","Coins","Grade","Section","ImageURL_Attack_Left","ImageURL_Attack_Right","FullName","ImageURL_IdleFront","ImageURL_IdleBack","ImageURL_Walk_Left","ImageURL_Walk_Right","ImageURL_Walk_Up","ImageURL_Walk_Down"];
+            const keys = [
+                "Email","PlayerName","CharacterID","CharacterName","CharacterClass","PositionX","PositionY","MovementAnimation","MapID",
+                "CurrentHP","MaxHP","CurrentMana","MaxMana","Attack","Defense","Speed","CritDamage","CurrentEXP","MaxEXP","Level",
+                "StatPointsAvailable","LevelUpsPending","Skill1_Name","Skill1_Damage","Skill1_Cooldown","Skill1_Image","Skill1_Range","Skill1_AnimationURL",
+                "Skill2_Name","Skill2_Damage","Skill2_Cooldown","Skill2_Image","Skill2_Range","Skill2_AnimationURL",
+                "Skill3_Name","Skill3_Damage","Skill3_Cooldown","Skill3_Image","Skill3_Range","Skill3_AnimationURL",
+                "PeerID","Coins","Grade","Section","ImageURL_Attack_Left","ImageURL_Attack_Right","FullName",
+                "ImageURL_IdleFront","ImageURL_IdleBack","ImageURL_Walk_Left","ImageURL_Walk_Right","ImageURL_Walk_Up","ImageURL_Walk_Down"
+            ];
 
             for (const row of rows) {
                 const obj = {};
-                row.forEach((val, i) => { obj[keys[i]] = val; });
+                row.forEach((val, i) => { if (keys[i]) obj[keys[i]] = val; });
                 if (obj.Email === email) return obj;
             }
             return null;
