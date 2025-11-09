@@ -30,7 +30,7 @@ if (process.env.GOOGLE_SERVICE_ACCOUNT) {
 
 /* ====================== Colyseus Schema ====================== */
 class Player extends schema.Schema {
-    constructor(data) {
+    constructor(data = {}) {
         super();
         Object.assign(this, data);
     }
@@ -61,11 +61,16 @@ schema.defineTypes(Player, {
     maxExp: "number",
     speed: "number",
 
-    // Optional: If needed, convert images to strings (flat structure)
-    images: { map: "string" }
+    images: { map: "string" } // simple map of image URLs
 });
 
-class State extends schema.Schema {}
+/* ====================== State ====================== */
+class State extends schema.Schema {
+    constructor() {
+        super();
+        this.players = new schema.MapSchema(); // Map of Player instances
+    }
+}
 schema.defineTypes(State, {
     players: { map: Player }
 });
@@ -73,12 +78,12 @@ schema.defineTypes(State, {
 /* ====================== MMORPGRoom ====================== */
 exports.MMORPGRoom = class MMORPGRoom extends Room {
 
-    onCreate() {
+    onCreate(options) {
         console.log("✅ MMORPGRoom created");
 
         this.setState(new State());
 
-        /* ✅ Movement Sync */
+        /* ====================== Movement Sync ====================== */
         this.onMessage("move", (client, data) => {
             const p = this.state.players.get(client.sessionId);
             if (!p) return;
@@ -92,7 +97,7 @@ exports.MMORPGRoom = class MMORPGRoom extends Room {
             p.MapID = data.MapID ?? p.MapID;
         });
 
-        /* ✅ Attack Sync */
+        /* ====================== Attack Sync ====================== */
         this.onMessage("attack", (client, data) => {
             const p = this.state.players.get(client.sessionId);
             if (!p) return;
@@ -128,7 +133,6 @@ exports.MMORPGRoom = class MMORPGRoom extends Room {
             pdata = {}; // Fallback defaults
         }
 
-        /* ✅ Create Synced Player Schema */
         const player = new Player({
             id: pdata.CharacterID || client.sessionId,
             name: pdata.CharacterName || "Unknown",
@@ -175,14 +179,14 @@ exports.MMORPGRoom = class MMORPGRoom extends Room {
 
     onLeave(client) {
         console.log("🔴 Leave:", client.sessionId);
-        this.state.players.delete(client.sessionId);
+        if (this.state?.players) this.state.players.delete(client.sessionId);
     }
 
     onDispose() {
         console.log("❌ Disposing MMORPGRoom");
     }
 
-    /* ✅ Google Sheets Loader */
+    /* ====================== Google Sheets Loader ====================== */
     async loadPlayerData(email) {
         if (!sheets) return null;
 
