@@ -1,17 +1,27 @@
 const { Room, Client } = require("colyseus");
-const { google } = require("googleapis");
+let sheets = null;
 
 // ====================== Google Sheets Setup ======================
 const SHEET_ID = "1U3MFNEf7G32Gs10Z0s0NoiZ6PPP1TgsEVbRUFcmjr7Y";
 const SHEET_RANGE = "PlayerData!A2:Z"; // adjust if necessary
 
-// Use environment variable for Render deployment
-const auth = new google.auth.GoogleAuth({
-    credentials: JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT),
-    scopes: ["https://www.googleapis.com/auth/spreadsheets.readonly"]
-});
+// Initialize Google Sheets only if env variable exists
+if (process.env.GOOGLE_SERVICE_ACCOUNT) {
+    const { google } = require("googleapis");
+    const serviceAccountJSON = process.env.GOOGLE_SERVICE_ACCOUNT;
 
-const sheets = google.sheets({ version: "v4", auth });
+    try {
+        const auth = new google.auth.GoogleAuth({
+            credentials: JSON.parse(serviceAccountJSON),
+            scopes: ["https://www.googleapis.com/auth/spreadsheets.readonly"]
+        });
+        sheets = google.sheets({ version: "v4", auth });
+    } catch (err) {
+        console.error("❌ Failed to initialize Google Sheets:", err);
+    }
+} else {
+    console.warn("⚠️ GOOGLE_SERVICE_ACCOUNT env variable is not set. Sheet data will be unavailable.");
+}
 
 // ====================== PlayerRoom ======================
 exports.PlayerRoom = class PlayerRoom extends Room {
@@ -62,16 +72,17 @@ exports.PlayerRoom = class PlayerRoom extends Room {
         }
 
         let pdata = null;
-        try {
-            pdata = await this.loadPlayerData(options.email);
-        } catch (err) {
-            console.error("Error loading player data:", err);
+        if (sheets) {
+            try {
+                pdata = await this.loadPlayerData(options.email);
+            } catch (err) {
+                console.error("Error loading player data:", err);
+            }
         }
 
         if (!pdata) {
-            console.log("No data found for player:", options.email);
-            client.leave();
-            return;
+            console.warn("No sheet data found, using default values for player:", options.email);
+            pdata = {}; // fallback to defaults
         }
 
         // Initialize player state
@@ -108,41 +119,37 @@ exports.PlayerRoom = class PlayerRoom extends Room {
             }
         };
 
-        console.log(`Player ${pdata.CharacterName} initialized.`);
+        console.log(`Player ${this.state.players[client.sessionId].name} initialized.`);
     }
 
     async loadPlayerData(email) {
-        try {
-            const res = await sheets.spreadsheets.values.get({
-                spreadsheetId: SHEET_ID,
-                range: SHEET_RANGE
-            });
+        if (!sheets) return null;
 
-            const rows = res.data.values;
-            if (!rows || rows.length === 0) return null;
+        const res = await sheets.spreadsheets.values.get({
+            spreadsheetId: SHEET_ID,
+            range: SHEET_RANGE
+        });
 
-            const keys = [
-                "Email","PlayerName","CharacterID","CharacterName","CharacterClass","PositionX","PositionY","MovementAnimation","MapID",
-                "CurrentHP","MaxHP","CurrentMana","MaxMana","Attack","Defense","Speed","CritDamage","CurrentEXP","MaxEXP","Level",
-                "StatPointsAvailable","LevelUpsPending","Skill1_Name","Skill1_Damage","Skill1_Cooldown","Skill1_Image","Skill1_Range","Skill1_AnimationURL",
-                "Skill2_Name","Skill2_Damage","Skill2_Cooldown","Skill2_Image","Skill2_Range","Skill2_AnimationURL",
-                "Skill3_Name","Skill3_Damage","Skill3_Cooldown","Skill3_Image","Skill3_Range","Skill3_AnimationURL",
-                "PeerID","Coins","Grade","Section","ImageURL_Attack_Left","ImageURL_Attack_Right","FullName",
-                "ImageURL_IdleFront","ImageURL_IdleBack","ImageURL_Walk_Left","ImageURL_Walk_Right","ImageURL_Walk_Up","ImageURL_Walk_Down"
-            ];
+        const rows = res.data.values;
+        if (!rows || rows.length === 0) return null;
 
-            for (const row of rows) {
-                const obj = {};
-                row.forEach((val, i) => { if (keys[i]) obj[keys[i]] = val; });
-                if (obj.Email === email) return obj;
-            }
+        const keys = [
+            "Email","PlayerName","CharacterID","CharacterName","CharacterClass","PositionX","PositionY","MovementAnimation","MapID",
+            "CurrentHP","MaxHP","CurrentMana","MaxMana","Attack","Defense","Speed","CritDamage","CurrentEXP","MaxEXP","Level",
+            "StatPointsAvailable","LevelUpsPending","Skill1_Name","Skill1_Damage","Skill1_Cooldown","Skill1_Image","Skill1_Range","Skill1_AnimationURL",
+            "Skill2_Name","Skill2_Damage","Skill2_Cooldown","Skill2_Image","Skill2_Range","Skill2_AnimationURL",
+            "Skill3_Name","Skill3_Damage","Skill3_Cooldown","Skill3_Image","Skill3_Range","Skill3_AnimationURL",
+            "PeerID","Coins","Grade","Section","ImageURL_Attack_Left","ImageURL_Attack_Right","FullName",
+            "ImageURL_IdleFront","ImageURL_IdleBack","ImageURL_Walk_Left","ImageURL_Walk_Right","ImageURL_Walk_Up","ImageURL_Walk_Down"
+        ];
 
-            return null;
-
-        } catch (err) {
-            console.error("Error loading sheet:", err);
-            return null;
+        for (const row of rows) {
+            const obj = {};
+            row.forEach((val, i) => { if (keys[i]) obj[keys[i]] = val; });
+            if (obj.Email === email) return obj;
         }
+
+        return null;
     }
 
     onLeave(client, consented) {
