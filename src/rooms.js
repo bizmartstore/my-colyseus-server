@@ -1,9 +1,9 @@
 // ============================================================
-// src/rooms.js — MMORPG Room Definition (Final Fixed Version)
+// src/rooms.js — MMORPG Room Definition (Fixed Version)
 // ============================================================
 
 const { Room } = require("colyseus");
-const schema = require("@colyseus/schema");
+const { Schema, MapSchema, type } = require("@colyseus/schema");
 
 let sheets = null;
 
@@ -29,58 +29,43 @@ if (process.env.GOOGLE_SERVICE_ACCOUNT) {
 }
 
 /* ====================== Colyseus Schema ====================== */
-class Player extends schema.Schema {
-    constructor(data = {}) {
-        super();
-        Object.assign(this, data);
-    }
+class Player extends Schema {
+    @type("string") id = "";
+    @type("string") name = "";
+    @type("string") class = "";
+
+    @type("number") x = 0;
+    @type("number") y = 0;
+    @type("number") MapID = 101;
+
+    @type("number") vx = 0;
+    @type("number") vy = 0;
+    @type("boolean") moving = false;
+    @type("string") lastDir = "IdleFront";
+    @type("boolean") attacking = false;
+    @type("string") attackAnimation = "";
+
+    @type("number") hp = 100;
+    @type("number") maxHp = 100;
+    @type("number") mana = 100;
+    @type("number") maxMana = 100;
+    @type("number") level = 1;
+    @type("number") exp = 0;
+    @type("number") maxExp = 100;
+    @type("number") speed = 5;
+
+    @type({ map: "string" }) images = new MapSchema();
 }
 
-schema.defineTypes(Player, {
-    id: "string",
-    name: "string",
-    class: "string",
-
-    x: "number",
-    y: "number",
-    MapID: "number",
-
-    vx: "number",
-    vy: "number",
-    moving: "boolean",
-    lastDir: "string",
-    attacking: "boolean",
-    attackAnimation: "string",
-
-    hp: "number",
-    maxHp: "number",
-    mana: "number",
-    maxMana: "number",
-    level: "number",
-    exp: "number",
-    maxExp: "number",
-    speed: "number",
-
-    images: { map: "string" } // map of image URLs
-});
-
-/* ====================== State ====================== */
-class State extends schema.Schema {
-    constructor() {
-        super();
-        this.players = new schema.MapSchema(); // Map of Player instances
-    }
+class State extends Schema {
+    @type({ map: Player }) players = new MapSchema();
 }
-schema.defineTypes(State, {
-    players: { map: Player }
-});
 
 /* ====================== MMORPGRoom ====================== */
 exports.MMORPGRoom = class MMORPGRoom extends Room {
 
     onCreate(options) {
         console.log("✅ MMORPGRoom created");
-
         this.setState(new State());
 
         // ----------------- Movement Sync -----------------
@@ -128,47 +113,46 @@ exports.MMORPGRoom = class MMORPGRoom extends Room {
                 console.error("⚠️ Sheet error:", err);
             }
         }
-
         if (!pdata) pdata = {}; // fallback defaults
 
-        const player = new Player({
-            id: pdata.CharacterID || client.sessionId,
-            name: pdata.CharacterName || "Unknown",
-            class: pdata.CharacterClass || "Adventurer",
+        const player = new Player();
+        player.id = pdata.CharacterID || client.sessionId;
+        player.name = pdata.CharacterName || "Unknown";
+        player.class = pdata.CharacterClass || "Adventurer";
 
-            x: Number(pdata.PositionX) || 0,
-            y: Number(pdata.PositionY) || 0,
-            MapID: Number(pdata.MapID) || 101,
+        player.x = Number(pdata.PositionX) || 0;
+        player.y = Number(pdata.PositionY) || 0;
+        player.MapID = Number(pdata.MapID) || 101;
 
-            vx: 0,
-            vy: 0,
-            moving: false,
-            lastDir: pdata.MovementAnimation || "IdleFront",
-            attacking: false,
-            attackAnimation: pdata.ImageURL_Attack_Right || "",
+        player.vx = 0;
+        player.vy = 0;
+        player.moving = false;
+        player.lastDir = pdata.MovementAnimation || "IdleFront";
+        player.attacking = false;
+        player.attackAnimation = pdata.ImageURL_Attack_Right || "";
 
-            hp: Number(pdata.CurrentHP) || 100,
-            maxHp: Number(pdata.MaxHP) || 100,
-            mana: Number(pdata.CurrentMana) || 100,
-            maxMana: Number(pdata.MaxMana) || 100,
+        player.hp = Number(pdata.CurrentHP) || 100;
+        player.maxHp = Number(pdata.MaxHP) || 100;
+        player.mana = Number(pdata.CurrentMana) || 100;
+        player.maxMana = Number(pdata.MaxMana) || 100;
 
-            level: Number(pdata.Level) || 1,
-            exp: Number(pdata.CurrentEXP) || 0,
-            maxExp: Number(pdata.MaxEXP) || 100,
+        player.level = Number(pdata.Level) || 1;
+        player.exp = Number(pdata.CurrentEXP) || 0;
+        player.maxExp = Number(pdata.MaxEXP) || 100;
+        player.speed = Number(pdata.Speed) || 5;
 
-            speed: Number(pdata.Speed) || 5,
-
-            images: {
-                idleFront: pdata.ImageURL_IdleFront || "",
-                idleBack: pdata.ImageURL_IdleBack || "",
-                walkLeft: pdata.ImageURL_Walk_Left || "",
-                walkRight: pdata.ImageURL_Walk_Right || "",
-                walkUp: pdata.ImageURL_Walk_Up || "",
-                walkDown: pdata.ImageURL_Walk_Down || "",
-                attackLeft: pdata.ImageURL_Attack_Left || "",
-                attackRight: pdata.ImageURL_Attack_Right || ""
-            }
-        });
+        // ✅ Populate MapSchema images
+        const images = pdata.images || {
+            idleFront: pdata.ImageURL_IdleFront || "",
+            idleBack: pdata.ImageURL_IdleBack || "",
+            walkLeft: pdata.ImageURL_Walk_Left || "",
+            walkRight: pdata.ImageURL_Walk_Right || "",
+            walkUp: pdata.ImageURL_Walk_Up || "",
+            walkDown: pdata.ImageURL_Walk_Down || "",
+            attackLeft: pdata.ImageURL_Attack_Left || "",
+            attackRight: pdata.ImageURL_Attack_Right || ""
+        };
+        Object.entries(images).forEach(([k, v]) => player.images.set(k, v));
 
         this.state.players.set(client.sessionId, player);
         console.log(`✅ Player initialized: ${player.name}`);
@@ -176,7 +160,7 @@ exports.MMORPGRoom = class MMORPGRoom extends Room {
 
     onLeave(client) {
         console.log("🔴 Leave:", client.sessionId);
-        if (this.state?.players) this.state.players.delete(client.sessionId);
+        this.state.players.delete(client.sessionId);
     }
 
     onDispose() {
@@ -210,7 +194,6 @@ exports.MMORPGRoom = class MMORPGRoom extends Room {
             row.forEach((val, i) => keys[i] && (obj[keys[i]] = val));
             if (obj.Email === email) return obj;
         }
-
         return null;
     }
 };
