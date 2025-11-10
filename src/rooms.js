@@ -114,6 +114,7 @@ class MMORPGRoom extends Room {
       const player = this.state.players.get(client.sessionId);
       if (!player) return;
 
+      // Update player state
       player.x = Number(data.PositionX ?? player.x);
       player.y = Number(data.PositionY ?? player.y);
       player.direction = data.direction || player.direction;
@@ -121,23 +122,35 @@ class MMORPGRoom extends Room {
       player.attacking = !!data.attacking;
       player.mapID = Number(data.mapId ?? player.mapID);
 
-      this.broadcast("player_move", {
-        id: client.sessionId,
-        x: player.x,
-        y: player.y,
-        direction: player.direction,
-        moving: player.moving,
-        attacking: player.attacking,
-        mapID: player.mapID,
-        idleFront: player.idleFront,
-        idleBack: player.idleBack,
-        walkLeft: player.walkLeft,
-        walkRight: player.walkRight,
-        walkUp: player.walkUp,
-        walkDown: player.walkDown,
-        attackLeft: player.attackLeft,
-        attackRight: player.attackRight,
-      }, { except: client });
+      // Broadcast movement to all other clients
+      this.broadcast(
+        "player_move",
+        {
+          id: client.sessionId,
+          x: player.x,
+          y: player.y,
+          direction: player.direction,
+          moving: player.moving,
+          attacking: player.attacking,
+          mapID: player.mapID,
+          idleFront: player.idleFront,
+          idleBack: player.idleBack,
+          walkLeft: player.walkLeft,
+          walkRight: player.walkRight,
+          walkUp: player.walkUp,
+          walkDown: player.walkDown,
+          attackLeft: player.attackLeft,
+          attackRight: player.attackRight,
+          currentHP: player.currentHP,
+          maxHP: player.maxHP,
+          currentMana: player.currentMana,
+          maxMana: player.maxMana,
+          currentEXP: player.currentEXP,
+          maxEXP: player.maxEXP,
+          level: player.level,
+        },
+        { except: client }
+      );
     });
 
     // ============================================================
@@ -180,6 +193,7 @@ class MMORPGRoom extends Room {
       const player = this.state.players.get(client.sessionId);
       if (!player) return;
 
+      // Update stats
       player.currentHP = Number(data.currentHP ?? player.currentHP);
       player.maxHP = Number(data.maxHP ?? player.maxHP);
       player.currentMana = Number(data.currentMana ?? player.currentMana);
@@ -188,16 +202,21 @@ class MMORPGRoom extends Room {
       player.maxEXP = Number(data.maxEXP ?? player.maxEXP);
       player.level = Number(data.level ?? player.level);
 
-      this.broadcast("player_stats_update", {
-        id: client.sessionId,
-        currentHP: player.currentHP,
-        maxHP: player.maxHP,
-        currentMana: player.currentMana,
-        maxMana: player.maxMana,
-        currentEXP: player.currentEXP,
-        maxEXP: player.maxEXP,
-        level: player.level
-      }, { except: client });
+      // Broadcast to other clients
+      this.broadcast(
+        "player_stats_update",
+        {
+          id: client.sessionId,
+          currentHP: player.currentHP,
+          maxHP: player.maxHP,
+          currentMana: player.currentMana,
+          maxMana: player.maxMana,
+          currentEXP: player.currentEXP,
+          maxEXP: player.maxEXP,
+          level: player.level,
+        },
+        { except: client }
+      );
     });
 
     // ============================================================
@@ -283,6 +302,13 @@ class MMORPGRoom extends Room {
       walkDown: newPlayer.walkDown,
       attackLeft: newPlayer.attackLeft,
       attackRight: newPlayer.attackRight,
+      currentHP: newPlayer.currentHP,
+      maxHP: newPlayer.maxHP,
+      currentMana: newPlayer.currentMana,
+      maxMana: newPlayer.maxMana,
+      currentEXP: newPlayer.currentEXP,
+      maxEXP: newPlayer.maxEXP,
+      level: newPlayer.level,
     });
   }
 
