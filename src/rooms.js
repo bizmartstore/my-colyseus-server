@@ -103,20 +103,44 @@ class MMORPGRoom extends Room {
     this.maxClients = 100;
     console.log("🟢 MMORPGRoom created");
 
-    // 🧭 Player Movement Handler
-    this.onMessage("move", (client, data) => {
+    // ============================================================
+    // 🧭 PLAYER MOVEMENT HANDLER (Real-time Broadcast)
+    // ============================================================
+    this.onMessage("player_move", (client, data) => {
       const player = this.state.players.get(client.sessionId);
       if (!player) return;
 
-      if (typeof data.x === "number") player.x = data.x;
-      if (typeof data.y === "number") player.y = data.y;
-      if (typeof data.direction === "string") player.direction = data.direction;
-      if (typeof data.moving === "boolean") player.moving = data.moving;
-      if (typeof data.attacking === "boolean") player.attacking = data.attacking;
-      if (typeof data.mapID === "number") player.mapID = 1;
+      // ✅ Update player state
+      player.x = Number(data.PositionX ?? player.x);
+      player.y = Number(data.PositionY ?? player.y);
+      player.direction = data.direction || player.direction;
+      player.moving = !!data.moving;
+      player.attacking = !!data.attacking;
+      player.mapID = Number(data.mapId ?? player.mapID);
+
+      // ✅ Broadcast movement to all other clients
+      this.broadcast("player_move", {
+        id: client.sessionId,
+        x: player.x,
+        y: player.y,
+        direction: player.direction,
+        moving: player.moving,
+        attacking: player.attacking,
+        mapID: player.mapID,
+        idleFront: player.idleFront,
+        idleBack: player.idleBack,
+        walkLeft: player.walkLeft,
+        walkRight: player.walkRight,
+        walkUp: player.walkUp,
+        walkDown: player.walkDown,
+        attackLeft: player.attackLeft,
+        attackRight: player.attackRight,
+      }, { except: client });
     });
 
-    // ⚔️ Player Attack Broadcast
+    // ============================================================
+    // ⚔️ PLAYER ATTACK HANDLER
+    // ============================================================
     this.onMessage("attack", (client, data) => {
       const player = this.state.players.get(client.sessionId);
       if (!player) return;
@@ -131,7 +155,9 @@ class MMORPGRoom extends Room {
       });
     });
 
-    // 💬 Chat System
+    // ============================================================
+    // 💬 CHAT HANDLER
+    // ============================================================
     this.onMessage("chat", (client, msg) => {
       const player = this.state.players.get(client.sessionId);
       if (!player) return;
@@ -145,11 +171,15 @@ class MMORPGRoom extends Room {
       });
     });
 
-    // 🧩 Sync Interval (20 FPS)
+    // ============================================================
+    // 🧩 STATE PATCH SYNC (20 FPS)
+    // ============================================================
     this.setSimulationInterval(() => this.broadcastPatch(), 50);
   }
 
-  // 👋 On Player Join
+  // ============================================================
+  // 👋 PLAYER JOIN
+  // ============================================================
   onJoin(client, options) {
     const p = options.player || options.playerData || {};
     console.log(`👋 ${p.Email || "Unknown"} joined the MMORPG room.`);
@@ -193,14 +223,14 @@ class MMORPGRoom extends Room {
     // Save player to state
     this.state.players.set(client.sessionId, newPlayer);
 
-    // ✅ Send welcome
+    // ✅ Send welcome message
     client.send("joined", {
       sessionId: client.sessionId,
       message: "✅ Welcome to MMORPG Room!",
       currentMap: newPlayer.mapID,
     });
 
-    // ✅ Broadcast full player info to all clients
+    // ✅ Notify everyone about this new player
     this.broadcast("player_joined", {
       id: client.sessionId,
       name: newPlayer.name,
@@ -225,7 +255,9 @@ class MMORPGRoom extends Room {
     });
   }
 
-  // 🚪 On Player Leave
+  // ============================================================
+  // 🚪 PLAYER LEAVE
+  // ============================================================
   onLeave(client) {
     const player = this.state.players.get(client.sessionId);
     if (!player) return;
@@ -234,7 +266,9 @@ class MMORPGRoom extends Room {
     this.broadcast("player_left", { id: client.sessionId });
   }
 
-  // 🧹 On Room Dispose
+  // ============================================================
+  // 🧹 ROOM DISPOSE
+  // ============================================================
   onDispose() {
     console.log("🧹 MMORPGRoom disposed.");
   }
