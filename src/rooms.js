@@ -1,5 +1,5 @@
 // ============================================================
-// src/rooms.js — Colyseus MMORPG Room Logic (Players + Monsters)
+// src/rooms.js — Colyseus MMORPG Room Logic (Node Compatible)
 // ============================================================
 
 const { Room } = require("colyseus");
@@ -86,77 +86,16 @@ defineTypes(Player, {
 });
 
 // ============================================================
-// 🧟 Monster Schema
-// ============================================================
-class Monster extends Schema {
-  constructor() {
-    super();
-    this.id = "";
-    this.name = "";
-    this.class = "";
-    this.level = 1;
-    this.baseHP = 100;
-    this.currentHP = 100;
-    this.attack = 10;
-    this.defense = 5;
-    this.speed = 8;
-    this.x = 300;
-    this.y = 300;
-    this.direction = "left";
-    this.animation = "Idle";
-    this.attacking = false;
-    this.dead = false;
-
-    this.imageIdleLeft = "";
-    this.imageIdleRight = "";
-    this.imageWalkLeft = "";
-    this.imageWalkRight = "";
-    this.imageAttackLeft = "";
-    this.imageAttackRight = "";
-    this.imageDieLeft = "";
-    this.imageDieRight = "";
-  }
-}
-
-defineTypes(Monster, {
-  id: "string",
-  name: "string",
-  class: "string",
-  level: "number",
-  baseHP: "number",
-  currentHP: "number",
-  attack: "number",
-  defense: "number",
-  speed: "number",
-  x: "number",
-  y: "number",
-  direction: "string",
-  animation: "string",
-  attacking: "boolean",
-  dead: "boolean",
-  imageIdleLeft: "string",
-  imageIdleRight: "string",
-  imageWalkLeft: "string",
-  imageWalkRight: "string",
-  imageAttackLeft: "string",
-  imageAttackRight: "string",
-  imageDieLeft: "string",
-  imageDieRight: "string",
-});
-
-// ============================================================
 // 🌍 Game State Schema
 // ============================================================
 class State extends Schema {
   constructor() {
     super();
     this.players = new MapSchema();
-    this.monsters = new MapSchema();
   }
 }
 defineTypes(State, {
   players: { map: Player },
-  monsters: { map: Monster },
 });
 
 // ============================================================
@@ -169,12 +108,13 @@ class MMORPGRoom extends Room {
     console.log("🟢 MMORPGRoom created");
 
     // ============================================================
-    // 🧭 PLAYER MOVEMENT HANDLER
+    // 🧭 PLAYER MOVEMENT HANDLER (Real-time Broadcast)
     // ============================================================
     this.onMessage("player_move", (client, data) => {
       const player = this.state.players.get(client.sessionId);
       if (!player) return;
 
+      // Update player state
       player.x = Number(data.PositionX ?? player.x);
       player.y = Number(data.PositionY ?? player.y);
       player.direction = data.direction || player.direction;
@@ -182,15 +122,35 @@ class MMORPGRoom extends Room {
       player.attacking = !!data.attacking;
       player.mapID = Number(data.mapId ?? player.mapID);
 
-      this.broadcast("player_move", {
-        id: client.sessionId,
-        x: player.x,
-        y: player.y,
-        direction: player.direction,
-        moving: player.moving,
-        attacking: player.attacking,
-        mapID: player.mapID,
-      }, { except: client });
+      // Broadcast movement to all other clients
+      this.broadcast(
+        "player_move",
+        {
+          id: client.sessionId,
+          x: player.x,
+          y: player.y,
+          direction: player.direction,
+          moving: player.moving,
+          attacking: player.attacking,
+          mapID: player.mapID,
+          idleFront: player.idleFront,
+          idleBack: player.idleBack,
+          walkLeft: player.walkLeft,
+          walkRight: player.walkRight,
+          walkUp: player.walkUp,
+          walkDown: player.walkDown,
+          attackLeft: player.attackLeft,
+          attackRight: player.attackRight,
+          currentHP: player.currentHP,
+          maxHP: player.maxHP,
+          currentMana: player.currentMana,
+          maxMana: player.maxMana,
+          currentEXP: player.currentEXP,
+          maxEXP: player.maxEXP,
+          level: player.level,
+        },
+        { except: client }
+      );
     });
 
     // ============================================================
@@ -211,83 +171,58 @@ class MMORPGRoom extends Room {
     });
 
     // ============================================================
-    // 🧟 Initialize monsters from sheet data (server-side cache)
+    // 💬 CHAT HANDLER
     // ============================================================
-    if (options.monsters && Array.isArray(options.monsters)) {
-      options.monsters.forEach((m) => {
-        const monster = new Monster();
-        monster.id = m.MonsterID;
-        monster.name = m.Name;
-        monster.class = m.Class;
-        monster.level = Number(m.Level);
-        monster.baseHP = Number(m.BaseHP);
-        monster.currentHP = Number(m.BaseHP);
-        monster.attack = Number(m.Attack);
-        monster.defense = Number(m.Defense);
-        monster.speed = Number(m.Speed);
-        monster.x = Number(m.PositionX);
-        monster.y = Number(m.PositionY);
+    this.onMessage("chat", (client, msg) => {
+      const player = this.state.players.get(client.sessionId);
+      if (!player) return;
+      const text = (msg?.text || "").toString().trim();
+      if (!text.length) return;
 
-        monster.imageIdleLeft = m.ImageURL_IdleLeft;
-        monster.imageIdleRight = m.ImageURL_IdleRight;
-        monster.imageWalkLeft = m.ImageURL_Walk_Left;
-        monster.imageWalkRight = m.ImageURL_Walk_Right;
-        monster.imageAttackLeft = m.ImageURL_Attack_Left;
-        monster.imageAttackRight = m.ImageURL_Attack_Right;
-        monster.imageDieLeft = m.ImageURL_Die_Left;
-        monster.imageDieRight = m.ImageURL_Die_Right;
-
-        this.state.monsters.set(monster.id, monster);
+      this.broadcast("chat_message", {
+        sender: player.name,
+        text,
+        mapID: player.mapID,
       });
-      console.log(`🐉 Loaded ${this.state.monsters.size} monsters`);
-    }
+    });
 
     // ============================================================
-    // 🧠 Monster AI simulation (every 1s)
+    // ❤️ HP/MP/EXP REAL-TIME SYNC
     // ============================================================
-    this.setSimulationInterval(() => {
-      for (let [id, monster] of this.state.monsters.entries()) {
-        if (monster.dead) continue;
+    this.onMessage("update_stats", (client, data) => {
+      const player = this.state.players.get(client.sessionId);
+      if (!player) return;
 
-        // Random small patrol movement
-        if (Math.random() < 0.05) {
-          const dx = (Math.random() - 0.5) * monster.speed * 2;
-          const dy = (Math.random() - 0.5) * monster.speed * 2;
-          monster.x += dx;
-          monster.y += dy;
-          monster.direction = dx > 0 ? "right" : "left";
-          monster.animation = dx > 0 ? "WalkRight" : "WalkLeft";
+      // Update stats
+      player.currentHP = Number(data.currentHP ?? player.currentHP);
+      player.maxHP = Number(data.maxHP ?? player.maxHP);
+      player.currentMana = Number(data.currentMana ?? player.currentMana);
+      player.maxMana = Number(data.maxMana ?? player.maxMana);
+      player.currentEXP = Number(data.currentEXP ?? player.currentEXP);
+      player.maxEXP = Number(data.maxEXP ?? player.maxEXP);
+      player.level = Number(data.level ?? player.level);
 
-          this.broadcast("monster_move", {
-            id,
-            x: monster.x,
-            y: monster.y,
-            direction: monster.direction,
-            animation: monster.animation,
-          });
-        }
-
-        // Random attack event
-        if (Math.random() < 0.02) {
-          monster.attacking = true;
-          monster.animation = monster.direction === "left" ? "AttackLeft" : "AttackRight";
-          this.broadcast("monster_attack", {
-            id,
-            animation: monster.animation,
-          });
-
-          setTimeout(() => {
-            monster.attacking = false;
-            monster.animation = monster.direction === "left" ? "IdleLeft" : "IdleRight";
-          }, 500);
-        }
-      }
-    }, 1000);
+      // Broadcast to other clients
+      this.broadcast(
+        "player_stats_update",
+        {
+          id: client.sessionId,
+          currentHP: player.currentHP,
+          maxHP: player.maxHP,
+          currentMana: player.currentMana,
+          maxMana: player.maxMana,
+          currentEXP: player.currentEXP,
+          maxEXP: player.maxEXP,
+          level: player.level,
+        },
+        { except: client }
+      );
+    });
 
     // ============================================================
-    // 🧩 State Patch Sync (20 FPS)
+    // 🧩 STATE PATCH SYNC (20 FPS)
     // ============================================================
-    this.setPatchRate(50);
+    this.setSimulationInterval(() => this.broadcastPatch(), 50);
   }
 
   // ============================================================
@@ -295,25 +230,85 @@ class MMORPGRoom extends Room {
   // ============================================================
   onJoin(client, options) {
     const p = options.player || options.playerData || {};
-    console.log(`👋 ${p.Email || "Unknown"} joined MMORPG room`);
+    console.log(`👋 ${p.Email || "Unknown"} joined the MMORPG room.`);
 
     const newPlayer = new Player();
+
+    // Basic info
     newPlayer.email = p.Email || client.sessionId;
     newPlayer.name = p.PlayerName || "Guest";
     newPlayer.characterID = p.CharacterID || "C000";
     newPlayer.characterName = p.CharacterName || "Unknown";
     newPlayer.characterClass = p.CharacterClass || "Adventurer";
+
+    // Position & animation
     newPlayer.x = Number(p.PositionX) || 300;
     newPlayer.y = Number(p.PositionY) || 200;
+    newPlayer.animation = p.MovementAnimation || "IdleFront";
     newPlayer.mapID = Number(p.MapID) || 1;
+
+    // Stats
     newPlayer.currentHP = Number(p.CurrentHP) || 100;
     newPlayer.maxHP = Number(p.MaxHP) || 100;
+    newPlayer.currentMana = Number(p.CurrentMana) || 100;
+    newPlayer.maxMana = Number(p.MaxMana) || 100;
+    newPlayer.currentEXP = Number(p.CurrentEXP) || 0;
+    newPlayer.maxEXP = Number(p.MaxEXP) || 100;
+    newPlayer.attack = Number(p.Attack) || 10;
+    newPlayer.defense = Number(p.Defense) || 5;
+    newPlayer.speed = Number(p.Speed) || 8;
+    newPlayer.critDamage = Number(p.CritDamage) || 100;
+    newPlayer.level = Number(p.Level) || 1;
 
+    // Sprite URLs
+    newPlayer.idleFront = p.ImageURL_IdleFront || "";
+    newPlayer.idleBack = p.ImageURL_IdleBack || "";
+    newPlayer.walkLeft = p.ImageURL_Walk_Left || "";
+    newPlayer.walkRight = p.ImageURL_Walk_Right || "";
+    newPlayer.walkUp = p.ImageURL_Walk_Up || "";
+    newPlayer.walkDown = p.ImageURL_Walk_Down || "";
+    newPlayer.attackLeft = p.ImageURL_Attack_Left || "";
+    newPlayer.attackRight = p.ImageURL_Attack_Right || "";
+
+    // Save player to state
     this.state.players.set(client.sessionId, newPlayer);
+
+    // ✅ Send welcome message
     client.send("joined", {
       sessionId: client.sessionId,
       message: "✅ Welcome to MMORPG Room!",
-      monsters: Array.from(this.state.monsters.values()),
+      currentMap: newPlayer.mapID,
+    });
+
+    // ✅ Notify everyone about this new player
+    this.broadcast("player_joined", {
+      id: client.sessionId,
+      name: newPlayer.name,
+      characterID: newPlayer.characterID,
+      characterName: newPlayer.characterName,
+      characterClass: newPlayer.characterClass,
+      x: newPlayer.x,
+      y: newPlayer.y,
+      animation: newPlayer.animation,
+      direction: newPlayer.direction,
+      moving: newPlayer.moving,
+      attacking: newPlayer.attacking,
+      mapID: newPlayer.mapID,
+      idleFront: newPlayer.idleFront,
+      idleBack: newPlayer.idleBack,
+      walkLeft: newPlayer.walkLeft,
+      walkRight: newPlayer.walkRight,
+      walkUp: newPlayer.walkUp,
+      walkDown: newPlayer.walkDown,
+      attackLeft: newPlayer.attackLeft,
+      attackRight: newPlayer.attackRight,
+      currentHP: newPlayer.currentHP,
+      maxHP: newPlayer.maxHP,
+      currentMana: newPlayer.currentMana,
+      maxMana: newPlayer.maxMana,
+      currentEXP: newPlayer.currentEXP,
+      maxEXP: newPlayer.maxEXP,
+      level: newPlayer.level,
     });
   }
 
@@ -321,10 +316,16 @@ class MMORPGRoom extends Room {
   // 🚪 PLAYER LEAVE
   // ============================================================
   onLeave(client) {
+    const player = this.state.players.get(client.sessionId);
+    if (!player) return;
+    console.log(`❌ ${player.name} left the room`);
     this.state.players.delete(client.sessionId);
     this.broadcast("player_left", { id: client.sessionId });
   }
 
+  // ============================================================
+  // 🧹 ROOM DISPOSE
+  // ============================================================
   onDispose() {
     console.log("🧹 MMORPGRoom disposed.");
   }
