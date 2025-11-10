@@ -29,6 +29,8 @@ class Player extends Schema {
     this.maxHP = 100;
     this.currentMana = 100;
     this.maxMana = 100;
+    this.currentEXP = 0;
+    this.maxEXP = 100;
     this.attack = 10;
     this.defense = 5;
     this.speed = 8;
@@ -65,6 +67,8 @@ defineTypes(Player, {
   maxHP: "number",
   currentMana: "number",
   maxMana: "number",
+  currentEXP: "number",
+  maxEXP: "number",
   attack: "number",
   defense: "number",
   speed: "number",
@@ -110,7 +114,6 @@ class MMORPGRoom extends Room {
       const player = this.state.players.get(client.sessionId);
       if (!player) return;
 
-      // ✅ Update player state
       player.x = Number(data.PositionX ?? player.x);
       player.y = Number(data.PositionY ?? player.y);
       player.direction = data.direction || player.direction;
@@ -118,7 +121,6 @@ class MMORPGRoom extends Room {
       player.attacking = !!data.attacking;
       player.mapID = Number(data.mapId ?? player.mapID);
 
-      // ✅ Broadcast movement to all other clients
       this.broadcast("player_move", {
         id: client.sessionId,
         x: player.x,
@@ -172,6 +174,33 @@ class MMORPGRoom extends Room {
     });
 
     // ============================================================
+    // ❤️ HP/MP/EXP REAL-TIME SYNC
+    // ============================================================
+    this.onMessage("update_stats", (client, data) => {
+      const player = this.state.players.get(client.sessionId);
+      if (!player) return;
+
+      player.currentHP = Number(data.currentHP ?? player.currentHP);
+      player.maxHP = Number(data.maxHP ?? player.maxHP);
+      player.currentMana = Number(data.currentMana ?? player.currentMana);
+      player.maxMana = Number(data.maxMana ?? player.maxMana);
+      player.currentEXP = Number(data.currentEXP ?? player.currentEXP);
+      player.maxEXP = Number(data.maxEXP ?? player.maxEXP);
+      player.level = Number(data.level ?? player.level);
+
+      this.broadcast("player_stats_update", {
+        id: client.sessionId,
+        currentHP: player.currentHP,
+        maxHP: player.maxHP,
+        currentMana: player.currentMana,
+        maxMana: player.maxMana,
+        currentEXP: player.currentEXP,
+        maxEXP: player.maxEXP,
+        level: player.level
+      }, { except: client });
+    });
+
+    // ============================================================
     // 🧩 STATE PATCH SYNC (20 FPS)
     // ============================================================
     this.setSimulationInterval(() => this.broadcastPatch(), 50);
@@ -204,6 +233,8 @@ class MMORPGRoom extends Room {
     newPlayer.maxHP = Number(p.MaxHP) || 100;
     newPlayer.currentMana = Number(p.CurrentMana) || 100;
     newPlayer.maxMana = Number(p.MaxMana) || 100;
+    newPlayer.currentEXP = Number(p.CurrentEXP) || 0;
+    newPlayer.maxEXP = Number(p.MaxEXP) || 100;
     newPlayer.attack = Number(p.Attack) || 10;
     newPlayer.defense = Number(p.Defense) || 5;
     newPlayer.speed = Number(p.Speed) || 8;
