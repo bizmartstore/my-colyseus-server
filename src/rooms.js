@@ -339,46 +339,29 @@ startMonsterAI() {
   const moveMonster = (m) => {
     if (!m) return;
 
-    // define wandering area around spawn
-    const radius = 80; // max distance from original position
+    const radius = 80;
     if (!m.spawnX) m.spawnX = m.x;
     if (!m.spawnY) m.spawnY = m.y;
 
-    // choose random small offset (target position)
     const newX = m.spawnX + (Math.random() * 2 - 1) * radius;
     const newY = m.spawnY + (Math.random() * 2 - 1) * radius;
 
-    // choose direction based on target
     let dx = newX - m.x;
     let dy = newY - m.y;
     const absX = Math.abs(dx);
     const absY = Math.abs(dy);
-    if (absX > absY) {
-      m.direction = dx < 0 ? "left" : "right";
-    } else {
-      m.direction = dy < 0 ? "up" : "down";
-    }
+    m.direction = absX > absY ? (dx < 0 ? "left" : "right") : (dy < 0 ? "up" : "down");
 
-    // start walking
     m.moving = true;
-    this.broadcast("monster_update", {
-      id: m.id,
-      name: m.name,
-      x: m.x,
-      y: m.y,
-      direction: m.direction,
-      moving: true,
-    });
 
-    // smooth movement (smaller step distance, faster refresh)
-    const steps = 40; // smoother
+    const steps = 20; // faster animation
     let step = 0;
-    const interval = 80; // ms between steps
     const stepInterval = setInterval(() => {
       step++;
       m.x += dx / steps;
       m.y += dy / steps;
 
+      // 🔥 broadcast every movement update
       this.broadcast("monster_update", {
         id: m.id,
         name: m.name,
@@ -391,8 +374,7 @@ startMonsterAI() {
       if (step >= steps) {
         clearInterval(stepInterval);
         m.moving = false;
-
-        // After stopping, broadcast idle animation state
+        // broadcast idle state
         this.broadcast("monster_update", {
           id: m.id,
           name: m.name,
@@ -400,23 +382,14 @@ startMonsterAI() {
           y: m.y,
           direction: m.direction,
           moving: false,
-          animation:
-            m.direction === "left"
-              ? m.idleLeft
-              : m.direction === "right"
-              ? m.idleRight
-              : m.direction === "up"
-              ? m.idleUp
-              : m.idleDown,
         });
-
-        // Wait 1–3 seconds before moving again
-        setTimeout(() => moveMonster(m), 1000 + Math.random() * 2000);
+        // move again after small pause
+        setTimeout(() => moveMonster(m), 1500 + Math.random() * 3000);
       }
-    }, interval);
+    }, 150);
   };
 
-  // start random wandering for all monsters
+  // start all monsters
   this.state.monsters.forEach((m) => {
     setTimeout(() => moveMonster(m), 1000 + Math.random() * 2000);
   });
