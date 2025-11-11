@@ -333,7 +333,7 @@ class MMORPGRoom extends Room {
   }
 
 // ============================================================
-// 🧠 SIMPLE MONSTER AI — random wandering within small radius
+// 🧠 ENHANCED MONSTER AI — smooth wandering + idle animations
 // ============================================================
 startMonsterAI() {
   const moveMonster = (m) => {
@@ -344,11 +344,11 @@ startMonsterAI() {
     if (!m.spawnX) m.spawnX = m.x;
     if (!m.spawnY) m.spawnY = m.y;
 
-    // choose random small offset
+    // choose random small offset (target position)
     const newX = m.spawnX + (Math.random() * 2 - 1) * radius;
     const newY = m.spawnY + (Math.random() * 2 - 1) * radius;
 
-    // choose direction based on movement
+    // choose direction based on target
     let dx = newX - m.x;
     let dy = newY - m.y;
     const absX = Math.abs(dx);
@@ -359,19 +359,29 @@ startMonsterAI() {
       m.direction = dy < 0 ? "up" : "down";
     }
 
+    // start walking
     m.moving = true;
+    this.broadcast("monster_update", {
+      id: m.id,
+      name: m.name,
+      x: m.x,
+      y: m.y,
+      direction: m.direction,
+      moving: true,
+    });
 
-    // move gradually (simulate walking)
-    const steps = 20;
+    // smooth movement (smaller step distance, faster refresh)
+    const steps = 40; // smoother
     let step = 0;
+    const interval = 80; // ms between steps
     const stepInterval = setInterval(() => {
       step++;
       m.x += dx / steps;
       m.y += dy / steps;
 
-      // sync to all players
       this.broadcast("monster_update", {
         id: m.id,
+        name: m.name,
         x: m.x,
         y: m.y,
         direction: m.direction,
@@ -381,18 +391,32 @@ startMonsterAI() {
       if (step >= steps) {
         clearInterval(stepInterval);
         m.moving = false;
+
+        // After stopping, broadcast idle animation state
         this.broadcast("monster_update", {
           id: m.id,
+          name: m.name,
+          x: m.x,
+          y: m.y,
+          direction: m.direction,
           moving: false,
+          animation:
+            m.direction === "left"
+              ? m.idleLeft
+              : m.direction === "right"
+              ? m.idleRight
+              : m.direction === "up"
+              ? m.idleUp
+              : m.idleDown,
         });
 
-        // wait random delay, then move again
-        setTimeout(() => moveMonster(m), 1500 + Math.random() * 3000);
+        // Wait 1–3 seconds before moving again
+        setTimeout(() => moveMonster(m), 1000 + Math.random() * 2000);
       }
-    }, 150);
+    }, interval);
   };
 
-  // loop through all monsters and start wandering
+  // start random wandering for all monsters
   this.state.monsters.forEach((m) => {
     setTimeout(() => moveMonster(m), 1000 + Math.random() * 2000);
   });
