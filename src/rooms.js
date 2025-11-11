@@ -37,14 +37,19 @@ class Player extends Schema {
     this.critDamage = 100;
     this.level = 1;
 
+    // ✅ Sprite URLs
     this.idleFront = "";
     this.idleBack = "";
+    this.idleLeft = "";
+    this.idleRight = "";
     this.walkLeft = "";
     this.walkRight = "";
     this.walkUp = "";
     this.walkDown = "";
     this.attackLeft = "";
     this.attackRight = "";
+    this.attackUp = "";
+    this.attackDown = "";
   }
 }
 
@@ -77,12 +82,16 @@ defineTypes(Player, {
 
   idleFront: "string",
   idleBack: "string",
+  idleLeft: "string",
+  idleRight: "string",
   walkLeft: "string",
   walkRight: "string",
   walkUp: "string",
   walkDown: "string",
   attackLeft: "string",
   attackRight: "string",
+  attackUp: "string",
+  attackDown: "string",
 });
 
 // ============================================================
@@ -94,9 +103,7 @@ class State extends Schema {
     this.players = new MapSchema();
   }
 }
-defineTypes(State, {
-  players: { map: Player },
-});
+defineTypes(State, { players: { map: Player } });
 
 // ============================================================
 // 🎮 MMORPG Room
@@ -108,13 +115,12 @@ class MMORPGRoom extends Room {
     console.log("🟢 MMORPGRoom created");
 
     // ============================================================
-    // 🧭 PLAYER MOVEMENT HANDLER (Real-time Broadcast)
+    // 🧭 PLAYER MOVEMENT HANDLER
     // ============================================================
     this.onMessage("player_move", (client, data) => {
       const player = this.state.players.get(client.sessionId);
       if (!player) return;
 
-      // Update player state
       player.x = Number(data.PositionX ?? player.x);
       player.y = Number(data.PositionY ?? player.y);
       player.direction = data.direction || player.direction;
@@ -122,7 +128,6 @@ class MMORPGRoom extends Room {
       player.attacking = !!data.attacking;
       player.mapID = Number(data.mapId ?? player.mapID);
 
-      // Broadcast movement to all other clients
       this.broadcast(
         "player_move",
         {
@@ -133,14 +138,20 @@ class MMORPGRoom extends Room {
           moving: player.moving,
           attacking: player.attacking,
           mapID: player.mapID,
+          // ✅ Include all sprites
           idleFront: player.idleFront,
           idleBack: player.idleBack,
+          idleLeft: player.idleLeft,
+          idleRight: player.idleRight,
           walkLeft: player.walkLeft,
           walkRight: player.walkRight,
           walkUp: player.walkUp,
           walkDown: player.walkDown,
           attackLeft: player.attackLeft,
           attackRight: player.attackRight,
+          attackUp: player.attackUp,
+          attackDown: player.attackDown,
+          // ✅ Stats
           currentHP: player.currentHP,
           maxHP: player.maxHP,
           currentMana: player.currentMana,
@@ -176,7 +187,7 @@ class MMORPGRoom extends Room {
     this.onMessage("chat", (client, msg) => {
       const player = this.state.players.get(client.sessionId);
       if (!player) return;
-      const text = (msg?.text || "").toString().trim();
+      const text = (msg?.text || "").trim();
       if (!text.length) return;
 
       this.broadcast("chat_message", {
@@ -193,7 +204,6 @@ class MMORPGRoom extends Room {
       const player = this.state.players.get(client.sessionId);
       if (!player) return;
 
-      // Update stats
       player.currentHP = Number(data.currentHP ?? player.currentHP);
       player.maxHP = Number(data.maxHP ?? player.maxHP);
       player.currentMana = Number(data.currentMana ?? player.currentMana);
@@ -202,7 +212,6 @@ class MMORPGRoom extends Room {
       player.maxEXP = Number(data.maxEXP ?? player.maxEXP);
       player.level = Number(data.level ?? player.level);
 
-      // Broadcast to other clients
       this.broadcast(
         "player_stats_update",
         {
@@ -229,8 +238,8 @@ class MMORPGRoom extends Room {
   // 👋 PLAYER JOIN
   // ============================================================
   onJoin(client, options) {
-    const p = options.player || options.playerData || {};
-    console.log(`👋 ${p.Email || "Unknown"} joined the MMORPG room.`);
+    const p = options.player || {};
+    console.log(`👋 ${p.Email || "Unknown"} joined MMORPG room.`);
 
     const newPlayer = new Player();
 
@@ -241,7 +250,7 @@ class MMORPGRoom extends Room {
     newPlayer.characterName = p.CharacterName || "Unknown";
     newPlayer.characterClass = p.CharacterClass || "Adventurer";
 
-    // Position & animation
+    // Position
     newPlayer.x = Number(p.PositionX) || 300;
     newPlayer.y = Number(p.PositionY) || 200;
     newPlayer.animation = p.MovementAnimation || "IdleFront";
@@ -260,27 +269,28 @@ class MMORPGRoom extends Room {
     newPlayer.critDamage = Number(p.CritDamage) || 100;
     newPlayer.level = Number(p.Level) || 1;
 
-    // Sprite URLs
+    // Sprites
     newPlayer.idleFront = p.ImageURL_IdleFront || "";
     newPlayer.idleBack = p.ImageURL_IdleBack || "";
+    newPlayer.idleLeft = p.ImageURL_IdleLeft || "";
+    newPlayer.idleRight = p.ImageURL_IdleRight || "";
     newPlayer.walkLeft = p.ImageURL_Walk_Left || "";
     newPlayer.walkRight = p.ImageURL_Walk_Right || "";
     newPlayer.walkUp = p.ImageURL_Walk_Up || "";
     newPlayer.walkDown = p.ImageURL_Walk_Down || "";
     newPlayer.attackLeft = p.ImageURL_Attack_Left || "";
     newPlayer.attackRight = p.ImageURL_Attack_Right || "";
+    newPlayer.attackUp = p.ImageURL_Attack_Up || "";
+    newPlayer.attackDown = p.ImageURL_Attack_Down || "";
 
-    // Save player to state
     this.state.players.set(client.sessionId, newPlayer);
 
-    // ✅ Send welcome message
     client.send("joined", {
       sessionId: client.sessionId,
       message: "✅ Welcome to MMORPG Room!",
       currentMap: newPlayer.mapID,
     });
 
-    // ✅ Notify everyone about this new player
     this.broadcast("player_joined", {
       id: client.sessionId,
       name: newPlayer.name,
@@ -289,19 +299,24 @@ class MMORPGRoom extends Room {
       characterClass: newPlayer.characterClass,
       x: newPlayer.x,
       y: newPlayer.y,
-      animation: newPlayer.animation,
       direction: newPlayer.direction,
       moving: newPlayer.moving,
       attacking: newPlayer.attacking,
       mapID: newPlayer.mapID,
+      // Include all sprites
       idleFront: newPlayer.idleFront,
       idleBack: newPlayer.idleBack,
+      idleLeft: newPlayer.idleLeft,
+      idleRight: newPlayer.idleRight,
       walkLeft: newPlayer.walkLeft,
       walkRight: newPlayer.walkRight,
       walkUp: newPlayer.walkUp,
       walkDown: newPlayer.walkDown,
       attackLeft: newPlayer.attackLeft,
       attackRight: newPlayer.attackRight,
+      attackUp: newPlayer.attackUp,
+      attackDown: newPlayer.attackDown,
+      // Stats
       currentHP: newPlayer.currentHP,
       maxHP: newPlayer.maxHP,
       currentMana: newPlayer.currentMana,
@@ -318,13 +333,13 @@ class MMORPGRoom extends Room {
   onLeave(client) {
     const player = this.state.players.get(client.sessionId);
     if (!player) return;
-    console.log(`❌ ${player.name} left the room`);
+    console.log(`❌ ${player.name} left`);
     this.state.players.delete(client.sessionId);
     this.broadcast("player_left", { id: client.sessionId });
   }
 
   // ============================================================
-  // 🧹 ROOM DISPOSE
+  // 🧹 DISPOSE
   // ============================================================
   onDispose() {
     console.log("🧹 MMORPGRoom disposed.");
