@@ -283,6 +283,8 @@ class MMORPGRoom extends Room {
     // 🧩 INIT: Spawn Monsters on Room Start
     // ============================================================
     this.spawnDefaultMonsters();
+    this.startMonsterAI();
+
 
     // ============================================================
     // 🧠 STATE PATCH SYNC (20 FPS)
@@ -329,6 +331,72 @@ class MMORPGRoom extends Room {
 
     console.log(`🧟 Spawned ${this.state.monsters.size} monsters`);
   }
+
+// ============================================================
+// 🧠 SIMPLE MONSTER AI — random wandering within small radius
+// ============================================================
+startMonsterAI() {
+  const moveMonster = (m) => {
+    if (!m) return;
+
+    // define wandering area around spawn
+    const radius = 80; // max distance from original position
+    if (!m.spawnX) m.spawnX = m.x;
+    if (!m.spawnY) m.spawnY = m.y;
+
+    // choose random small offset
+    const newX = m.spawnX + (Math.random() * 2 - 1) * radius;
+    const newY = m.spawnY + (Math.random() * 2 - 1) * radius;
+
+    // choose direction based on movement
+    let dx = newX - m.x;
+    let dy = newY - m.y;
+    const absX = Math.abs(dx);
+    const absY = Math.abs(dy);
+    if (absX > absY) {
+      m.direction = dx < 0 ? "left" : "right";
+    } else {
+      m.direction = dy < 0 ? "up" : "down";
+    }
+
+    m.moving = true;
+
+    // move gradually (simulate walking)
+    const steps = 20;
+    let step = 0;
+    const stepInterval = setInterval(() => {
+      step++;
+      m.x += dx / steps;
+      m.y += dy / steps;
+
+      // sync to all players
+      this.broadcast("monster_update", {
+        id: m.id,
+        x: m.x,
+        y: m.y,
+        direction: m.direction,
+        moving: true,
+      });
+
+      if (step >= steps) {
+        clearInterval(stepInterval);
+        m.moving = false;
+        this.broadcast("monster_update", {
+          id: m.id,
+          moving: false,
+        });
+
+        // wait random delay, then move again
+        setTimeout(() => moveMonster(m), 1500 + Math.random() * 3000);
+      }
+    }, 150);
+  };
+
+  // loop through all monsters and start wandering
+  this.state.monsters.forEach((m) => {
+    setTimeout(() => moveMonster(m), 1000 + Math.random() * 2000);
+  });
+}
 
   // ============================================================
   // 👋 PLAYER JOIN
