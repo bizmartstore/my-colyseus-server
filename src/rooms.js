@@ -421,13 +421,14 @@ startMonsterBattleAI() {
 
   setInterval(() => {
     this.state.monsters.forEach((m) => {
-      if (m.currentHP <= 0) return; // dead
+      if (m.currentHP <= 0) return; // Skip dead monsters
 
       // Find nearest player
       let nearestPlayer = null;
       let nearestDist = Infinity;
+
       this.state.players.forEach((p) => {
-        if (p.mapID !== m.mapID) return;
+        if (p.mapID !== m.mapID) return; // skip different map
         const dx = p.x - m.x;
         const dy = p.y - m.y;
         const dist = Math.sqrt(dx * dx + dy * dy);
@@ -441,28 +442,33 @@ startMonsterBattleAI() {
 
       // 🧭 Check aggression distance
       if (nearestDist < AGGRO_RANGE) {
-        // Move toward player
+        // Move toward nearest player
         const dx = nearestPlayer.x - m.x;
         const dy = nearestPlayer.y - m.y;
         const len = Math.sqrt(dx * dx + dy * dy) || 1;
         m.x += (dx / len) * m.speed * 0.6;
         m.y += (dy / len) * m.speed * 0.6;
 
-        // Direction
+        // Update facing direction
         m.direction =
           Math.abs(dx) > Math.abs(dy)
-            ? dx < 0 ? "left" : "right"
-            : dy < 0 ? "up" : "down";
+            ? (dx < 0 ? "left" : "right")
+            : (dy < 0 ? "up" : "down");
         m.moving = true;
 
-        // 🗡️ Attack when close
-        if (nearestDist < 40 && !m._lastAttackTime || Date.now() - m._lastAttackTime > ATTACK_INTERVAL) {
+        // 🗡️ Attack when close (fixed logic with parentheses)
+        if (
+          nearestDist < 40 &&
+          (!m._lastAttackTime || Date.now() - m._lastAttackTime > ATTACK_INTERVAL)
+        ) {
           m._lastAttackTime = Date.now();
           m.attacking = true;
 
+          // Calculate damage
           const rawDmg = Math.max(1, m.attack - nearestPlayer.defense);
           nearestPlayer.currentHP = Math.max(0, nearestPlayer.currentHP - rawDmg);
 
+          // Broadcast attack event
           this.broadcast("monster_attack", {
             monsterId: m.id,
             targetId: nearestPlayer.email,
@@ -470,22 +476,24 @@ startMonsterBattleAI() {
             playerHP: nearestPlayer.currentHP,
           });
 
-          // Sync HP back to all players
+          // Sync updated player HP
           this.broadcast("player_stats_update", {
             id: nearestPlayer.sessionId,
             currentHP: nearestPlayer.currentHP,
             maxHP: nearestPlayer.maxHP,
           });
 
+          // Stop attack animation after short delay
           setTimeout(() => (m.attacking = false), 400);
         }
       } 
-      // 😴 Out of range → return to spawn
+      // 😴 Out of range → return to spawn point
       else if (nearestDist > DISENGAGE_RANGE) {
         if (m.spawnX && m.spawnY) {
           const dx = m.spawnX - m.x;
           const dy = m.spawnY - m.y;
           const dist = Math.sqrt(dx * dx + dy * dy);
+
           if (dist > 2) {
             m.x += dx * 0.05;
             m.y += dy * 0.05;
@@ -496,7 +504,7 @@ startMonsterBattleAI() {
         }
       }
 
-      // Sync updates to clients
+      // 🔁 Sync monster state to clients
       this.broadcast("monster_update", {
         id: m.id,
         x: m.x,
