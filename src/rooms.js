@@ -415,86 +415,91 @@ startMonsterAI() {
 
 // =========================== 🧠 Monster Battle AI ===========================
 startMonsterBattleAI() {
-  const AGGRO_RANGE = 150;
-  const DISENGAGE_RANGE = 300;
-  const ATTACK_INTERVAL = 1500; // ms between attacks
+  const AGGRO_RANGE = 150;       // how close before monster chases
+  const DISENGAGE_RANGE = 300;   // how far before monster returns
+  const ATTACK_RANGE = 40;       // attack distance threshold
+  const ATTACK_INTERVAL = 1500;  // ms between attacks
 
   setInterval(() => {
+    // Loop through all monsters
     this.state.monsters.forEach((m) => {
       if (m.currentHP <= 0) return; // Skip dead monsters
 
-      // Find nearest player — capture sessionId too
+      // ==========================
+      // 🔍 FIND NEAREST PLAYER
+      // ==========================
       let nearestPlayer = null;
-      let nearestPlayerId = null; // <-- store sessionId (map key)
+      let nearestPlayerId = null;
       let nearestDist = Infinity;
 
-      // forEach provides (player, sessionId) if you use two args
       this.state.players.forEach((p, sessionId) => {
-        if (p.mapID !== m.mapID) return; // skip different map
+        if (p.mapID !== m.mapID) return; // skip if on different map
+
         const dx = p.x - m.x;
         const dy = p.y - m.y;
         const dist = Math.sqrt(dx * dx + dy * dy);
+
         if (dist < nearestDist) {
           nearestDist = dist;
           nearestPlayer = p;
-          nearestPlayerId = sessionId; // <-- remember the session id
+          nearestPlayerId = sessionId;
         }
       });
 
-      // ✅ FIX: 'return' instead of 'continue' (legal inside forEach callback)
       if (!nearestPlayer || !nearestPlayerId) {
-        // no players in this map — do nothing for this monster
-        return; // exit current monster iteration safely
+        // No players nearby
+        m.moving = false;
+        return;
       }
 
       // ==============================
       // 🧭 MONSTER AGGRO / CHASE LOGIC
       // ==============================
       if (nearestDist < AGGRO_RANGE) {
-        // Move toward nearest player
+        // Move toward player
         const dx = nearestPlayer.x - m.x;
         const dy = nearestPlayer.y - m.y;
         const len = Math.sqrt(dx * dx + dy * dy) || 1;
 
-        // Move slightly faster for smoother chasing
         m.x += (dx / len) * m.speed * 0.9;
         m.y += (dy / len) * m.speed * 0.9;
 
-        // Update facing direction
+        // Face toward target
         m.direction =
           Math.abs(dx) > Math.abs(dy)
             ? (dx < 0 ? "left" : "right")
             : (dy < 0 ? "up" : "down");
         m.moving = true;
 
+        // ✅ Recompute distance after movement for accurate attack
+        const newDx = nearestPlayer.x - m.x;
+        const newDy = nearestPlayer.y - m.y;
+        const newDist = Math.sqrt(newDx * newDx + newDy * newDy) || 0;
+
         // ==========================
         // ⚔️ ATTACK WHEN IN RANGE
         // ==========================
         if (
-          nearestDist < 40 &&
-          (!m._lastAttackTime ||
-            Date.now() - m._lastAttackTime > ATTACK_INTERVAL)
+          newDist < ATTACK_RANGE &&
+          (!m._lastAttackTime || Date.now() - m._lastAttackTime > ATTACK_INTERVAL)
         ) {
           m._lastAttackTime = Date.now();
           m.attacking = true;
 
-          // Calculate damage
+          // 🩸 Damage Calculation
           const rawDmg = Math.max(1, m.attack - nearestPlayer.defense);
-          nearestPlayer.currentHP = Math.max(
-            0,
-            nearestPlayer.currentHP - rawDmg
-          );
+          nearestPlayer.currentHP = Math.max(0, nearestPlayer.currentHP - rawDmg);
 
-          // Broadcast attack event — include both sessionId (id) and email
+          // 📡 Broadcast attack event
           this.broadcast("monster_attack", {
             monsterId: m.id,
-            targetSessionId: nearestPlayerId, // reliable identifier for session
-            targetId: nearestPlayer.email || "", // optional readable identifier
+            targetSessionId: nearestPlayerId,
+            targetId: nearestPlayer.email || "",
             damage: rawDmg,
             playerHP: nearestPlayer.currentHP,
           });
 
-          // Sync updated player HP using session id so clients can match
+          // 🔁 Sync player HP
           this.broadcast("player_stats_update", {
             id: nearestPlayerId,
             email: nearestPlayer.email || "",
@@ -502,12 +507,13 @@ startMonsterBattleAI() {
             maxHP: nearestPlayer.maxHP,
           });
 
-          // Stop attack animation after short delay
+          // Stop attack animation
           setTimeout(() => {
             m.attacking = false;
           }, 400);
         }
       }
+
       // ==============================
       // 😴 RETURN TO SPAWN IF TOO FAR
       // ==============================
@@ -542,6 +548,7 @@ startMonsterBattleAI() {
     });
   }, 300);
 }
+
 
 
   // ============================================================
