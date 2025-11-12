@@ -212,22 +212,218 @@ class MMORPGRoom extends Room {
       }, { except: client });
     });
 
-    // ============================================================
-    // ⚔️ PLAYER ATTACK HANDLER
-    // ============================================================
-    this.onMessage("attack", (client, data) => {
-      const player = this.state.players.get(client.sessionId);
-      if (!player) return;
+    // ---------- extend player attack handler so players can damage monsters ----------
+this.onMessage("attack", (client, data) => {
+  const player = this.state.players.get(client.sessionId);
+  if (!player) return;
 
-      this.broadcast("attack_event", {
-        attackerId: client.sessionId,
-        direction: data.direction || "right",
-        skillName: data.skillName || "Basic Attack",
-        damage: data.damage || 0,
-        crit: data.crit || false,
-        mapID: player.mapID,
-      });
+  // ✅ if targetId provided, apply damage to monster
+  if (data && data.targetId) {
+    const m = this.state.monsters.get(data.targetId);
+    if (m && m.mapID === player.mapID) {
+      // ✅ validate distance server-side (anti-cheat)
+      const dx = m.x - player.x;
+      const dy = m.y - player.y;
+      const distance = Math.sqrt(dx * dx + dy * dy);
+      const VALID_RANGE = 48; // adjust for sprite sizes
+
+      if (distance <= VALID_RANGE) {
+        const raw = Number(data.damage || player.attack || 5);
+        const mitigated = Math.max(1, raw - (m.defense || 0));
+        m.currentHP = Math.max(0, Number(m.currentHP || 0) - mitigated);
+
+        // ✅ Make monster face attacker when hit
+        if (Math.abs(dx) > Math.abs(dy)) {
+          m.direction = dx < 0 ? "left" : "right";
+        } else {
+          m.direction = dy < 0 ? "up" : "down";
+        }
+
+        // ✅ Broadcast monster HP & animation updates
+        this.broadcast("monster_update", {
+          id: m.id,
+          currentHP: m.currentHP,
+          x: m.x,
+          y: m.y,
+          moving: false,
+          attacking: false,
+          direction: m.direction,
+        });
+
+        // ✅ Handle monster death
+        if (m.currentHP <= 0) {
+          this.broadcast("monster_dead", {
+            id: m.id,
+            killer: client.sessionId,
+            mapID: m.mapID,
+          });
+
+          // remove from state
+          this.state.monsters.delete(m.id);
+
+          // ✅ Respawn after 8 seconds
+          setTimeout(() => {
+            const resp = new Monster();
+            Object.assign(resp, {
+              id: m.id,
+              name: m.name,
+              class: m.class,
+              level: m.level,
+              x: m.spawnX,
+              y: m.spawnY,
+              spawnX: m.spawnX,
+              spawnY: m.spawnY,
+              currentHP: m.maxHP,
+              maxHP: m.maxHP,
+              attack: m.attack,
+              defense: m.defense,
+              speed: m.speed,
+              critDamage: m.critDamage,
+              mapID: m.mapID,
+              // ✅ copy sprites
+              idleLeft: m.idleLeft,
+              idleRight: m.idleRight,
+              idleUp: m.idleUp,
+              idleDown: m.idleDown,
+              walkLeft: m.walkLeft,
+              walkRight: m.walkRight,
+              walkUp: m.walkUp,
+              walkDown: m.walkDown,
+              attackLeft: m.attackLeft,
+              attackRight: m.attackRight,
+              attackUp: m.attackUp,
+              attackDown: m.attackDown,
+            });
+
+            // ✅ reattach AI data
+            resp.aggroRadius = m.aggroRadius || 200;
+            resp.attackRange = m.attackRange || 40;
+            resp.leaveRadius = m.leaveRadius || 300;
+            resp.attackCooldown = m.attackCooldown || 1000;
+            resp._lastAttack = 0;
+            resp.targetId = null;
+
+            this.state.monsters.set(resp.id, resp);
+
+            // ✅ notify clients of respawn
+            this.broadcast("monster_spawn", {
+              id: resp.id,
+              x: resp.x,
+              y: resp.y,
+              mapID: resp.mapID,
+              direction: "down",
+            });
+          }, 8000);
+        }
+      } // distance valid
+    } // monster exists
+  }
+
+  // ✅ Broadcast the player attack for client animation
+  this.broadcast("attack_event", {
+    attackerId: client.sessionId,
+    direction: data.direction || "right",
+    skillName: data.skillName || "Basic Attack",
+    damage: data.damage || 0,
+    crit: data.crit || false,
+    mapID: player.mapID,
+  });
+});
+
+
+  // ============================================================
+  // 👋 PLAYER JOIN
+  // ============================================================
+  onJoin(client, options) {
+    const p = options.player || {};
+    console.log(`👋 ${p.Email || "Unknown"} joined MMORPG room.`);
+
+    const newPlayer = new Player();
+
+    // Basic info
+    newPlayer.email = p.Email || client.sessionId;
+    newPlayer.name = p.PlayerName || "Guest";
+    newPlayer.characterID = p.CharacterID || "C000";
+    newPlayer.characterName = p.CharacterName || "Unknown";
+    newPlayer.characterClass = p.CharacterClass || "Adventurer";
+
+    // Position
+    newPlayer.x = Number(p.PositionX) || 300;
+    newPlayer.y = Number(p.PositionY) || 200;
+    newPlayer.animation = p.MovementAnimation || "IdleFront";
+    newPlayer.mapID = Number(p.MapID) || 1;
+
+    // Stats
+    newPlayer.currentHP = Number(p.CurrentHP) || 100;
+    newPlayer.maxHP = Number(p.MaxHP) || 100;
+    newPlayer.currentMana = Number(p.CurrentMana) || 100;
+    newPlayer.maxMana = Number(p.MaxMana) || 100;
+    newPlayer.currentEXP = Number(p.CurrentEXP) || 0;
+    newPlayer.maxEXP = Number(p.MaxEXP) || 100;
+    newPlayer.attack = Number(p.Attack) || 10;
+    newPlayer.defense = Number(p.Defense) || 5;
+    newPlayer.speed = Number(p.Speed) || 8;
+    newPlayer.critDamage = Number(p.CritDamage) || 100;
+    newPlayer.level = Number(p.Level) || 1;
+
+    // Sprites
+    newPlayer.idleFront = p.ImageURL_IdleFront || "";
+    newPlayer.idleBack = p.ImageURL_IdleBack || "";
+    newPlayer.idleLeft = p.ImageURL_IdleLeft || "";
+    newPlayer.idleRight = p.ImageURL_IdleRight || "";
+    newPlayer.walkLeft = p.ImageURL_Walk_Left || "";
+    newPlayer.walkRight = p.ImageURL_Walk_Right || "";
+    newPlayer.walkUp = p.ImageURL_Walk_Up || "";
+    newPlayer.walkDown = p.ImageURL_Walk_Down || "";
+    newPlayer.attackLeft = p.ImageURL_Attack_Left || "";
+    newPlayer.attackRight = p.ImageURL_Attack_Right || "";
+    newPlayer.attackUp = p.ImageURL_Attack_Up || "";
+    newPlayer.attackDown = p.ImageURL_Attack_Down || "";
+
+    this.state.players.set(client.sessionId, newPlayer);
+
+    client.send("joined", {
+      sessionId: client.sessionId,
+      message: "✅ Welcome to MMORPG Room!",
+      currentMap: newPlayer.mapID,
     });
+
+    this.broadcast("player_joined", {
+      id: client.sessionId,
+      name: newPlayer.name,
+      characterID: newPlayer.characterID,
+      characterName: newPlayer.characterName,
+      characterClass: newPlayer.characterClass,
+      x: newPlayer.x,
+      y: newPlayer.y,
+      direction: newPlayer.direction,
+      moving: newPlayer.moving,
+      attacking: newPlayer.attacking,
+      mapID: newPlayer.mapID,
+      // Include all sprites
+      idleFront: newPlayer.idleFront,
+      idleBack: newPlayer.idleBack,
+      idleLeft: newPlayer.idleLeft,
+      idleRight: newPlayer.idleRight,
+      walkLeft: newPlayer.walkLeft,
+      walkRight: newPlayer.walkRight,
+      walkUp: newPlayer.walkUp,
+      walkDown: newPlayer.walkDown,
+      attackLeft: newPlayer.attackLeft,
+      attackRight: newPlayer.attackRight,
+      attackUp: newPlayer.attackUp,
+      attackDown: newPlayer.attackDown,
+      // Stats
+      currentHP: newPlayer.currentHP,
+      maxHP: newPlayer.maxHP,
+      currentMana: newPlayer.currentMana,
+      maxMana: newPlayer.maxMana,
+      currentEXP: newPlayer.currentEXP,
+      maxEXP: newPlayer.maxEXP,
+      level: newPlayer.level,
+    });
+  }
+
 
     // ============================================================
     // 🧟 MONSTER UPDATE HANDLER (for AI or admin control)
@@ -508,217 +704,6 @@ startMonsterAI() {
 }
 
 
-// ---------- extend player attack handler so players can damage monsters ----------
-this.onMessage("attack", (client, data) => {
-  const player = this.state.players.get(client.sessionId);
-  if (!player) return;
-
-  // ✅ if targetId provided, apply damage to monster
-  if (data && data.targetId) {
-    const m = this.state.monsters.get(data.targetId);
-    if (m && m.mapID === player.mapID) {
-      // ✅ validate distance server-side (anti-cheat)
-      const dx = m.x - player.x;
-      const dy = m.y - player.y;
-      const distance = Math.sqrt(dx * dx + dy * dy);
-      const VALID_RANGE = 48; // adjust for sprite sizes
-
-      if (distance <= VALID_RANGE) {
-        const raw = Number(data.damage || player.attack || 5);
-        const mitigated = Math.max(1, raw - (m.defense || 0));
-        m.currentHP = Math.max(0, Number(m.currentHP || 0) - mitigated);
-
-        // ✅ Make monster face attacker when hit
-        if (Math.abs(dx) > Math.abs(dy)) {
-          m.direction = dx < 0 ? "left" : "right";
-        } else {
-          m.direction = dy < 0 ? "up" : "down";
-        }
-
-        // ✅ Broadcast monster HP & animation updates
-        this.broadcast("monster_update", {
-          id: m.id,
-          currentHP: m.currentHP,
-          x: m.x,
-          y: m.y,
-          moving: false,
-          attacking: false,
-          direction: m.direction,
-        });
-
-        // ✅ Handle monster death
-        if (m.currentHP <= 0) {
-          this.broadcast("monster_dead", {
-            id: m.id,
-            killer: client.sessionId,
-            mapID: m.mapID,
-          });
-
-          // remove from state
-          this.state.monsters.delete(m.id);
-
-          // ✅ Respawn after 8 seconds
-          setTimeout(() => {
-            const resp = new Monster();
-            Object.assign(resp, {
-              id: m.id,
-              name: m.name,
-              class: m.class,
-              level: m.level,
-              x: m.spawnX,
-              y: m.spawnY,
-              spawnX: m.spawnX,
-              spawnY: m.spawnY,
-              currentHP: m.maxHP,
-              maxHP: m.maxHP,
-              attack: m.attack,
-              defense: m.defense,
-              speed: m.speed,
-              critDamage: m.critDamage,
-              mapID: m.mapID,
-              // ✅ copy sprites
-              idleLeft: m.idleLeft,
-              idleRight: m.idleRight,
-              idleUp: m.idleUp,
-              idleDown: m.idleDown,
-              walkLeft: m.walkLeft,
-              walkRight: m.walkRight,
-              walkUp: m.walkUp,
-              walkDown: m.walkDown,
-              attackLeft: m.attackLeft,
-              attackRight: m.attackRight,
-              attackUp: m.attackUp,
-              attackDown: m.attackDown,
-            });
-
-            // ✅ reattach AI data
-            resp.aggroRadius = m.aggroRadius || 200;
-            resp.attackRange = m.attackRange || 40;
-            resp.leaveRadius = m.leaveRadius || 300;
-            resp.attackCooldown = m.attackCooldown || 1000;
-            resp._lastAttack = 0;
-            resp.targetId = null;
-
-            this.state.monsters.set(resp.id, resp);
-
-            // ✅ notify clients of respawn
-            this.broadcast("monster_spawn", {
-              id: resp.id,
-              x: resp.x,
-              y: resp.y,
-              mapID: resp.mapID,
-              direction: "down",
-            });
-          }, 8000);
-        }
-      } // distance valid
-    } // monster exists
-  }
-
-  // ✅ Broadcast the player attack for client animation
-  this.broadcast("attack_event", {
-    attackerId: client.sessionId,
-    direction: data.direction || "right",
-    skillName: data.skillName || "Basic Attack",
-    damage: data.damage || 0,
-    crit: data.crit || false,
-    mapID: player.mapID,
-  });
-});
-
-
-  // ============================================================
-  // 👋 PLAYER JOIN
-  // ============================================================
-  onJoin(client, options) {
-    const p = options.player || {};
-    console.log(`👋 ${p.Email || "Unknown"} joined MMORPG room.`);
-
-    const newPlayer = new Player();
-
-    // Basic info
-    newPlayer.email = p.Email || client.sessionId;
-    newPlayer.name = p.PlayerName || "Guest";
-    newPlayer.characterID = p.CharacterID || "C000";
-    newPlayer.characterName = p.CharacterName || "Unknown";
-    newPlayer.characterClass = p.CharacterClass || "Adventurer";
-
-    // Position
-    newPlayer.x = Number(p.PositionX) || 300;
-    newPlayer.y = Number(p.PositionY) || 200;
-    newPlayer.animation = p.MovementAnimation || "IdleFront";
-    newPlayer.mapID = Number(p.MapID) || 1;
-
-    // Stats
-    newPlayer.currentHP = Number(p.CurrentHP) || 100;
-    newPlayer.maxHP = Number(p.MaxHP) || 100;
-    newPlayer.currentMana = Number(p.CurrentMana) || 100;
-    newPlayer.maxMana = Number(p.MaxMana) || 100;
-    newPlayer.currentEXP = Number(p.CurrentEXP) || 0;
-    newPlayer.maxEXP = Number(p.MaxEXP) || 100;
-    newPlayer.attack = Number(p.Attack) || 10;
-    newPlayer.defense = Number(p.Defense) || 5;
-    newPlayer.speed = Number(p.Speed) || 8;
-    newPlayer.critDamage = Number(p.CritDamage) || 100;
-    newPlayer.level = Number(p.Level) || 1;
-
-    // Sprites
-    newPlayer.idleFront = p.ImageURL_IdleFront || "";
-    newPlayer.idleBack = p.ImageURL_IdleBack || "";
-    newPlayer.idleLeft = p.ImageURL_IdleLeft || "";
-    newPlayer.idleRight = p.ImageURL_IdleRight || "";
-    newPlayer.walkLeft = p.ImageURL_Walk_Left || "";
-    newPlayer.walkRight = p.ImageURL_Walk_Right || "";
-    newPlayer.walkUp = p.ImageURL_Walk_Up || "";
-    newPlayer.walkDown = p.ImageURL_Walk_Down || "";
-    newPlayer.attackLeft = p.ImageURL_Attack_Left || "";
-    newPlayer.attackRight = p.ImageURL_Attack_Right || "";
-    newPlayer.attackUp = p.ImageURL_Attack_Up || "";
-    newPlayer.attackDown = p.ImageURL_Attack_Down || "";
-
-    this.state.players.set(client.sessionId, newPlayer);
-
-    client.send("joined", {
-      sessionId: client.sessionId,
-      message: "✅ Welcome to MMORPG Room!",
-      currentMap: newPlayer.mapID,
-    });
-
-    this.broadcast("player_joined", {
-      id: client.sessionId,
-      name: newPlayer.name,
-      characterID: newPlayer.characterID,
-      characterName: newPlayer.characterName,
-      characterClass: newPlayer.characterClass,
-      x: newPlayer.x,
-      y: newPlayer.y,
-      direction: newPlayer.direction,
-      moving: newPlayer.moving,
-      attacking: newPlayer.attacking,
-      mapID: newPlayer.mapID,
-      // Include all sprites
-      idleFront: newPlayer.idleFront,
-      idleBack: newPlayer.idleBack,
-      idleLeft: newPlayer.idleLeft,
-      idleRight: newPlayer.idleRight,
-      walkLeft: newPlayer.walkLeft,
-      walkRight: newPlayer.walkRight,
-      walkUp: newPlayer.walkUp,
-      walkDown: newPlayer.walkDown,
-      attackLeft: newPlayer.attackLeft,
-      attackRight: newPlayer.attackRight,
-      attackUp: newPlayer.attackUp,
-      attackDown: newPlayer.attackDown,
-      // Stats
-      currentHP: newPlayer.currentHP,
-      maxHP: newPlayer.maxHP,
-      currentMana: newPlayer.currentMana,
-      maxMana: newPlayer.maxMana,
-      currentEXP: newPlayer.currentEXP,
-      maxEXP: newPlayer.maxEXP,
-      level: newPlayer.level,
-    });
-  }
 
   // ============================================================
   // 🚪 PLAYER LEAVE
