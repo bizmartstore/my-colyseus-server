@@ -293,109 +293,157 @@ class MMORPGRoom extends Room {
   }
 
   spawnDefaultMonsters() {
-    const monsters = [
-      {
-        id: "M001",
-        name: "Orc Soldier",
-        class: "Beast",
-        level: 1,
-        x: 490,
-        y: 260,
-        currentHP: 120,
-        maxHP: 120,
-        attack: 35,
-        defense: 13,
-        speed: 8,
-        critDamage: 100,
-        mapID: 1,
-        idleLeft: "https://i.ibb.co/93z4RPk8/Shadow-male-Assassin-Rogue-standing-in-a-poised-st-breathing-idle-west-1.gif",
-        idleRight: "https://i.ibb.co/XxVTbBxG/Shadow-male-Assassin-Rogue-standing-in-a-poised-st-breathing-idle-east-1.gif",
-        idleUp: "https://i.ibb.co/gFLNNQxv/Shadow-male-Assassin-Rogue-standing-in-a-poised-st-breathing-idle-north-1.gif",
-        idleDown: "https://i.ibb.co/zWptpc41/Shadow-male-Assassin-Rogue-standing-in-a-poised-st-breathing-idle-south-1.gif",
-        walkLeft: "https://i.ibb.co/TqmN8GXx/Shadow-male-Assassin-Rogue-standing-in-a-poised-st-running-4-frames-west.gif",
-        walkRight: "https://i.ibb.co/gMVNP0mJ/Shadow-male-Assassin-Rogue-standing-in-a-poised-st-running-4-frames-east.gif",
-        walkUp: "https://i.ibb.co/Pvbx1mrQ/Shadow-male-Assassin-Rogue-standing-in-a-poised-st-running-4-frames-north.gif",
-        walkDown: "https://i.ibb.co/k6BWK4BQ/ezgif-com-animated-gif-maker-5.gif",
-        attackLeft: "https://i.ibb.co/CKNkMfwb/Shadow-male-Assassin-Rogue-standing-in-a-poised-st-cross-punch-east2-ezgif-com-rotate.gif",
-        attackRight: "https://i.ibb.co/4gTn9xzM/Shadow-male-Assassin-Rogue-standing-in-a-poised-st-cross-punch-east-2.gif",
-        attackUp: "https://i.ibb.co/39B2HvNb/Shadow-male-Assassin-Rogue-standing-in-a-poised-st-cross-punch-north.gif",
-        attackDown: "https://i.ibb.co/M5sNBTyF/Shadow-male-Assassin-Rogue-standing-in-a-poised-st-cross-punch-south-1.gif",
-      }
-    ];
-
-    for (const m of monsters) {
-      const monster = new Monster();
-      Object.assign(monster, m);
-      this.state.monsters.set(m.id, monster);
+  const monsters = [
+    {
+      id: "M001",
+      name: "Orc Soldier",
+      class: "Beast",
+      level: 1,
+      x: 490,
+      y: 260,
+      currentHP: 120,
+      maxHP: 120,
+      attack: 35,
+      defense: 13,
+      speed: 8,
+      critDamage: 100,
+      mapID: 1,
+      idleLeft: "https://i.ibb.co/93z4RPk8/Shadow-male-Assassin-Rogue-standing-in-a-poised-st-breathing-idle-west-1.gif",
+      idleRight: "https://i.ibb.co/XxVTbBxG/Shadow-male-Assassin-Rogue-standing-in-a-poised-st-breathing-idle-east-1.gif",
+      idleUp: "https://i.ibb.co/gFLNNQxv/Shadow-male-Assassin-Rogue-standing-in-a-poised-st-breathing-idle-north-1.gif",
+      idleDown: "https://i.ibb.co/zWptpc41/Shadow-male-Assassin-Rogue-standing-in-a-poised-st-breathing-idle-south-1.gif",
+      walkLeft: "https://i.ibb.co/TqmN8GXx/Shadow-male-Assassin-Rogue-standing-in-a-poised-st-running-4-frames-west.gif",
+      walkRight: "https://i.ibb.co/gMVNP0mJ/Shadow-male-Assassin-Rogue-standing-in-a-poised-st-running-4-frames-east.gif",
+      walkUp: "https://i.ibb.co/Pvbx1mrQ/Shadow-male-Assassin-Rogue-standing-in-a-poised-st-running-4-frames-north.gif",
+      walkDown: "https://i.ibb.co/k6BWK4BQ/ezgif-com-animated-gif-maker-5.gif",
+      attackLeft: "https://i.ibb.co/CKNkMfwb/Shadow-male-Assassin-Rogue-standing-in-a-poised-st-cross-punch-east2-ezgif-com-rotate.gif",
+      attackRight: "https://i.ibb.co/4gTn9xzM/Shadow-male-Assassin-Rogue-standing-in-a-poised-st-cross-punch-east-2.gif",
+      attackUp: "https://i.ibb.co/39B2HvNb/Shadow-male-Assassin-Rogue-standing-in-a-poised-st-cross-punch-north.gif",
+      attackDown: "https://i.ibb.co/M5sNBTyF/Shadow-male-Assassin-Rogue-standing-in-a-poised-st-cross-punch-south-1.gif",
     }
+  ];
 
-    console.log(`🧟 Spawned ${this.state.monsters.size} monsters`);
+  for (const m of monsters) {
+    const monster = new Monster();
+    Object.assign(monster, m);
+
+    // store spawn position and AI properties
+    monster.spawnX = m.x;
+    monster.spawnY = m.y;
+    monster.targetId = null;
+    monster.aggroRadius = 200;   // distance to detect players
+    monster.attackRange = 40;    // attack distance
+    monster.leaveRadius = 300;   // distance before losing target
+    monster.attackCooldown = 1000;
+    monster._lastAttack = 0;
+
+    this.state.monsters.set(m.id, monster);
   }
+
+  console.log(`🧟 Spawned ${this.state.monsters.size} monsters`);
+}
+
 
 // ============================================================
 // 🧠 SIMPLE MONSTER AI — random wandering within small radius
 // ============================================================
 startMonsterAI() {
-  const moveMonster = (m) => {
-    if (!m) return;
+  const TICK_MS = 200;
 
-    // define wandering area around spawn
-    const radius = 80; // max distance from original position
-    if (!m.spawnX) m.spawnX = m.x;
-    if (!m.spawnY) m.spawnY = m.y;
+  const tick = () => {
+    const now = Date.now();
 
-    // choose random small offset
-    const newX = m.spawnX + (Math.random() * 2 - 1) * radius;
-    const newY = m.spawnY + (Math.random() * 2 - 1) * radius;
+    this.state.monsters.forEach((m) => {
+      if (!m.spawnX) m.spawnX = m.x;
+      if (!m.spawnY) m.spawnY = m.y;
 
-    // choose direction based on movement
-    let dx = newX - m.x;
-    let dy = newY - m.y;
-    const absX = Math.abs(dx);
-    const absY = Math.abs(dy);
-    if (absX > absY) {
-      m.direction = dx < 0 ? "left" : "right";
-    } else {
-      m.direction = dy < 0 ? "up" : "down";
-    }
+      const players = Array.from(this.state.players.values());
+      let target = m.targetId ? this.state.players.get(m.targetId) : null;
 
-    m.moving = true;
-
-    // move gradually (simulate walking)
-    const steps = 20;
-    let step = 0;
-    const stepInterval = setInterval(() => {
-      step++;
-      m.x += dx / steps;
-      m.y += dy / steps;
-
-      // sync to all players
-      this.broadcast("monster_update", {
-        id: m.id,
-        x: m.x,
-        y: m.y,
-        direction: m.direction,
-        moving: true,
-      });
-
-      if (step >= steps) {
-        clearInterval(stepInterval);
-        m.moving = false;
-        this.broadcast("monster_update", {
-          id: m.id,
-          moving: false,
+      // Acquire new target if none
+      if (!target) {
+        let nearest = null, nearestDist = Infinity;
+        players.forEach((p) => {
+          const dist = Math.hypot(p.x - m.x, p.y - m.y);
+          if (dist < m.aggroRadius && dist < nearestDist) {
+            nearest = p;
+            nearestDist = dist;
+          }
         });
-
-        // wait random delay, then move again
-        setTimeout(() => moveMonster(m), 1500 + Math.random() * 3000);
+        if (nearest) m.targetId = nearest.email || nearest.sessionId;
+        target = nearest;
       }
-    }, 150);
+
+      // If has target → chase or attack
+      if (target) {
+        const dx = target.x - m.x;
+        const dy = target.y - m.y;
+        const dist = Math.hypot(dx, dy);
+
+        if (dist > m.leaveRadius) {
+          // player too far → reset target
+          m.targetId = null;
+        } else if (dist <= m.attackRange) {
+          // attack
+          if (now - m._lastAttack > m.attackCooldown) {
+            m._lastAttack = now;
+            m.attacking = true;
+            this.broadcast("monster_update", { id: m.id, attacking: true });
+
+            const damage = Math.max(1, m.attack - target.defense * 0.5);
+            target.currentHP = Math.max(0, target.currentHP - damage);
+
+            this.broadcast("player_stats_update", {
+              id: target.sessionId,
+              currentHP: target.currentHP,
+            });
+
+            setTimeout(() => {
+              m.attacking = false;
+              this.broadcast("monster_update", { id: m.id, attacking: false });
+            }, 300);
+          }
+        } else {
+          // chase movement
+          const step = Math.min(m.speed * (TICK_MS / 1000) * 1.5, dist);
+          m.x += (dx / dist) * step;
+          m.y += (dy / dist) * step;
+          m.moving = true;
+          this.broadcast("monster_update", { id: m.id, x: m.x, y: m.y, moving: true });
+        }
+      } else {
+        // No target → random wandering
+        if (!m._nextWander || now > m._nextWander) {
+          m._nextWander = now + 3000 + Math.random() * 4000;
+          const radius = 80;
+          m._wanderTarget = {
+            x: m.spawnX + (Math.random() * 2 - 1) * radius,
+            y: m.spawnY + (Math.random() * 2 - 1) * radius,
+          };
+        }
+
+        if (m._wanderTarget) {
+          const dx = m._wanderTarget.x - m.x;
+          const dy = m._wanderTarget.y - m.y;
+          const dist = Math.hypot(dx, dy);
+          if (dist > 5) {
+            const step = Math.min(m.speed * (TICK_MS / 1000), dist);
+            m.x += (dx / dist) * step;
+            m.y += (dy / dist) * step;
+            m.moving = true;
+            this.broadcast("monster_update", { id: m.id, x: m.x, y: m.y, moving: true });
+          } else {
+            m.moving = false;
+            this.broadcast("monster_update", { id: m.id, moving: false });
+          }
+        }
+      }
+    });
+
+    this._monsterAITick = setTimeout(tick, TICK_MS);
   };
 
-  // loop through all monsters and start wandering
-  this.state.monsters.forEach((m) => {
-    setTimeout(() => moveMonster(m), 1000 + Math.random() * 2000);
-  });
+  tick();
 }
 
   // ============================================================
