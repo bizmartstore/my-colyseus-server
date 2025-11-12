@@ -115,10 +115,6 @@ class Monster extends Schema {
     this.speed = 5;
     this.critDamage = 100;
     this.mapID = 1;
-    this.spawnX = 0;
-    this.spawnY = 0;
-    this.targetId = "";
-    this.aggro = false;
 
     // ✅ Monster Sprite URLs
     this.idleLeft = "";
@@ -153,10 +149,6 @@ defineTypes(Monster, {
   speed: "number",
   critDamage: "number",
   mapID: "number",
-  spawnX: "number",
-  spawnY: "number",
-  targetId: "string",
-  aggro: "boolean",
   idleLeft: "string",
   idleRight: "string",
   idleUp: "string",
@@ -293,6 +285,7 @@ class MMORPGRoom extends Room {
     this.spawnDefaultMonsters();
     this.startMonsterAI();
 
+
     // ============================================================
     // 🧠 STATE PATCH SYNC (20 FPS)
     // ============================================================
@@ -333,142 +326,77 @@ class MMORPGRoom extends Room {
     for (const m of monsters) {
       const monster = new Monster();
       Object.assign(monster, m);
-      monster.spawnX = m.x;
-      monster.spawnY = m.y;
-      monster.aggro = false;
-      monster.targetId = "";
       this.state.monsters.set(m.id, monster);
     }
 
     console.log(`🧟 Spawned ${this.state.monsters.size} monsters`);
   }
 
-  // ============================================================
-// 🧠 MONSTER AI — Aggro / Attack / Return (Schema-based sync)
+// ============================================================
+// 🧠 SIMPLE MONSTER AI — random wandering within small radius
 // ============================================================
 startMonsterAI() {
-  const AGGRO_RADIUS = 200;
-  const ATTACK_RADIUS = 50;
-  const LEASH_RADIUS = 350;
-  const ATTACK_COOLDOWN = 1500;
+  const moveMonster = (m) => {
+    if (!m) return;
 
-  setInterval(() => {
-    this.state.monsters.forEach((m) => {
-      if (m.currentHP <= 0) return; // dead monster, skip
+    // define wandering area around spawn
+    const radius = 80; // max distance from original position
+    if (!m.spawnX) m.spawnX = m.x;
+    if (!m.spawnY) m.spawnY = m.y;
 
-      let nearestPlayer = null;
-      let nearestDist = Infinity;
+    // choose random small offset
+    const newX = m.spawnX + (Math.random() * 2 - 1) * radius;
+    const newY = m.spawnY + (Math.random() * 2 - 1) * radius;
 
-      // 🔍 Find nearest player
-      this.state.players.forEach((p) => {
-        if (!p || p.mapID !== m.mapID) return;
-        const dx = p.x - m.x;
-        const dy = p.y - m.y;
-        const dist = Math.sqrt(dx * dx + dy * dy);
-        if (dist < nearestDist) {
-          nearestDist = dist;
-          nearestPlayer = p;
-        }
+    // choose direction based on movement
+    let dx = newX - m.x;
+    let dy = newY - m.y;
+    const absX = Math.abs(dx);
+    const absY = Math.abs(dy);
+    if (absX > absY) {
+      m.direction = dx < 0 ? "left" : "right";
+    } else {
+      m.direction = dy < 0 ? "up" : "down";
+    }
+
+    m.moving = true;
+
+    // move gradually (simulate walking)
+    const steps = 20;
+    let step = 0;
+    const stepInterval = setInterval(() => {
+      step++;
+      m.x += dx / steps;
+      m.y += dy / steps;
+
+      // sync to all players
+      this.broadcast("monster_update", {
+        id: m.id,
+        x: m.x,
+        y: m.y,
+        direction: m.direction,
+        moving: true,
       });
 
-      // 🎯 Aggro mode: follow and attack
-      if (nearestPlayer && nearestDist < AGGRO_RADIUS) {
-        m.aggro = true;
-        m.targetId = nearestPlayer.$sessionId;
+      if (step >= steps) {
+        clearInterval(stepInterval);
+        m.moving = false;
+        this.broadcast("monster_update", {
+          id: m.id,
+          moving: false,
+        });
 
-        const dx = nearestPlayer.x - m.x;
-        const dy = nearestPlayer.y - m.y;
-        const dist = Math.sqrt(dx * dx + dy * dy);
-
-        // 🏃 Move closer to player
-        if (dist > 0) {
-          const nx = dx / dist;
-          const ny = dy / dist;
-          m.x += nx * (m.speed / 2);
-          m.y += ny * (m.speed / 2);
-        }
-
-        // 🔄 Direction based on movement vector
-        m.direction =
-          Math.abs(dx) > Math.abs(dy)
-            ? dx < 0
-              ? "left"
-              : "right"
-            : dy < 0
-            ? "up"
-            : "down";
-
-        m.moving = true;
-
-        // 💥 Attack if in range and off cooldown
-        if (
-          dist < ATTACK_RADIUS &&
-          (!m._lastAttack || Date.now() - m._lastAttack > ATTACK_COOLDOWN)
-        ) {
-          m._lastAttack = Date.now();
-          m.attacking = true;
-
-          const damage = Math.max(1, m.attack - nearestPlayer.defense);
-          nearestPlayer.currentHP = Math.max(
-            0,
-            nearestPlayer.currentHP - damage
-          );
-
-          // Notify clients for visuals (attack + HP)
-          this.broadcast("monster_attack", {
-            monsterId: m.id,
-            targetId: m.targetId,
-            damage,
-            newHP: nearestPlayer.currentHP,
-          });
-
-          this.broadcast("player_stats_update", {
-            id: m.targetId,
-            currentHP: nearestPlayer.currentHP,
-            maxHP: nearestPlayer.maxHP,
-          });
-
-          setTimeout(() => (m.attacking = false), 400);
-        }
-
-      // 🧭 If had aggro but lost target, return home
-      } else if (m.aggro) {
-        const dx = m.x - m.spawnX;
-        const dy = m.y - m.spawnY;
-        const dist = Math.sqrt(dx * dx + dy * dy);
-        if (dist > LEASH_RADIUS) {
-          m.aggro = false;
-          m.targetId = "";
-        }
-
-      // 💤 Idle / Return to spawn
-      } else {
-        const dx = m.spawnX - m.x;
-        const dy = m.spawnY - m.y;
-        const dist = Math.sqrt(dx * dx + dy * dy);
-        if (dist > 10) {
-          m.x += dx * 0.05;
-          m.y += dy * 0.05;
-          m.direction =
-            Math.abs(dx) > Math.abs(dy)
-              ? dx < 0
-                ? "left"
-                : "right"
-              : dy < 0
-              ? "up"
-              : "down";
-          m.moving = true;
-        } else {
-          m.moving = false;
-        }
+        // wait random delay, then move again
+        setTimeout(() => moveMonster(m), 1500 + Math.random() * 3000);
       }
+    }, 150);
+  };
 
-      // ❌ Removed manual broadcast — schema handles this automatically!
-      // Colyseus will now sync m.x, m.y, m.direction, etc. automatically
-    });
-  }, 300);
+  // loop through all monsters and start wandering
+  this.state.monsters.forEach((m) => {
+    setTimeout(() => moveMonster(m), 1000 + Math.random() * 2000);
+  });
 }
-
 
   // ============================================================
   // 👋 PLAYER JOIN
@@ -479,17 +407,20 @@ startMonsterAI() {
 
     const newPlayer = new Player();
 
+    // Basic info
     newPlayer.email = p.Email || client.sessionId;
     newPlayer.name = p.PlayerName || "Guest";
     newPlayer.characterID = p.CharacterID || "C000";
     newPlayer.characterName = p.CharacterName || "Unknown";
     newPlayer.characterClass = p.CharacterClass || "Adventurer";
 
+    // Position
     newPlayer.x = Number(p.PositionX) || 300;
     newPlayer.y = Number(p.PositionY) || 200;
     newPlayer.animation = p.MovementAnimation || "IdleFront";
     newPlayer.mapID = Number(p.MapID) || 1;
 
+    // Stats
     newPlayer.currentHP = Number(p.CurrentHP) || 100;
     newPlayer.maxHP = Number(p.MaxHP) || 100;
     newPlayer.currentMana = Number(p.CurrentMana) || 100;
@@ -502,6 +433,7 @@ startMonsterAI() {
     newPlayer.critDamage = Number(p.CritDamage) || 100;
     newPlayer.level = Number(p.Level) || 1;
 
+    // Sprites
     newPlayer.idleFront = p.ImageURL_IdleFront || "";
     newPlayer.idleBack = p.ImageURL_IdleBack || "";
     newPlayer.idleLeft = p.ImageURL_IdleLeft || "";
@@ -535,6 +467,7 @@ startMonsterAI() {
       moving: newPlayer.moving,
       attacking: newPlayer.attacking,
       mapID: newPlayer.mapID,
+      // Include all sprites
       idleFront: newPlayer.idleFront,
       idleBack: newPlayer.idleBack,
       idleLeft: newPlayer.idleLeft,
@@ -547,6 +480,7 @@ startMonsterAI() {
       attackRight: newPlayer.attackRight,
       attackUp: newPlayer.attackUp,
       attackDown: newPlayer.attackDown,
+      // Stats
       currentHP: newPlayer.currentHP,
       maxHP: newPlayer.maxHP,
       currentMana: newPlayer.currentMana,
