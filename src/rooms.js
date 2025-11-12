@@ -344,46 +344,111 @@ class MMORPGRoom extends Room {
   }
 
   // ============================================================
-  // 🧠 MONSTER AI — Aggro / Attack / Return
-  // ============================================================
-  startMonsterAI() {
-    const AGGRO_RADIUS = 200;
-    const ATTACK_RADIUS = 50;
-    const LEASH_RADIUS = 350;
-    const ATTACK_COOLDOWN = 1500;
+// 🧠 MONSTER AI — Aggro / Attack / Return (Schema-based sync)
+// ============================================================
+startMonsterAI() {
+  const AGGRO_RADIUS = 200;
+  const ATTACK_RADIUS = 50;
+  const LEASH_RADIUS = 350;
+  const ATTACK_COOLDOWN = 1500;
 
-    setInterval(() => {
-      this.state.monsters.forEach((m) => {
-        if (m.currentHP <= 0) return;
+  setInterval(() => {
+    this.state.monsters.forEach((m) => {
+      if (m.currentHP <= 0) return; // dead monster, skip
 
-        let nearestPlayer = null;
-        let nearestDist = Infinity;
+      let nearestPlayer = null;
+      let nearestDist = Infinity;
 
-        this.state.players.forEach((p) => {
-          if (!p || p.mapID !== m.mapID) return;
-          const dx = p.x - m.x;
-          const dy = p.y - m.y;
-          const dist = Math.sqrt(dx * dx + dy * dy);
-          if (dist < nearestDist) {
-            nearestDist = dist;
-            nearestPlayer = p;
-          }
-        });
+      // 🔍 Find nearest player
+      this.state.players.forEach((p) => {
+        if (!p || p.mapID !== m.mapID) return;
+        const dx = p.x - m.x;
+        const dy = p.y - m.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist < nearestDist) {
+          nearestDist = dist;
+          nearestPlayer = p;
+        }
+      });
 
-        if (nearestPlayer && nearestDist < AGGRO_RADIUS) {
-          m.aggro = true;
-          m.targetId = nearestPlayer.$sessionId;
+      // 🎯 Aggro mode: follow and attack
+      if (nearestPlayer && nearestDist < AGGRO_RADIUS) {
+        m.aggro = true;
+        m.targetId = nearestPlayer.$sessionId;
 
-          const dx = nearestPlayer.x - m.x;
-          const dy = nearestPlayer.y - m.y;
-          const dist = Math.sqrt(dx * dx + dy * dy);
-          if (dist > 0) {
-            const nx = dx / dist;
-            const ny = dy / dist;
-            m.x += nx * (m.speed / 2);
-            m.y += ny * (m.speed / 2);
-          }
+        const dx = nearestPlayer.x - m.x;
+        const dy = nearestPlayer.y - m.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
 
+        // 🏃 Move closer to player
+        if (dist > 0) {
+          const nx = dx / dist;
+          const ny = dy / dist;
+          m.x += nx * (m.speed / 2);
+          m.y += ny * (m.speed / 2);
+        }
+
+        // 🔄 Direction based on movement vector
+        m.direction =
+          Math.abs(dx) > Math.abs(dy)
+            ? dx < 0
+              ? "left"
+              : "right"
+            : dy < 0
+            ? "up"
+            : "down";
+
+        m.moving = true;
+
+        // 💥 Attack if in range and off cooldown
+        if (
+          dist < ATTACK_RADIUS &&
+          (!m._lastAttack || Date.now() - m._lastAttack > ATTACK_COOLDOWN)
+        ) {
+          m._lastAttack = Date.now();
+          m.attacking = true;
+
+          const damage = Math.max(1, m.attack - nearestPlayer.defense);
+          nearestPlayer.currentHP = Math.max(
+            0,
+            nearestPlayer.currentHP - damage
+          );
+
+          // Notify clients for visuals (attack + HP)
+          this.broadcast("monster_attack", {
+            monsterId: m.id,
+            targetId: m.targetId,
+            damage,
+            newHP: nearestPlayer.currentHP,
+          });
+
+          this.broadcast("player_stats_update", {
+            id: m.targetId,
+            currentHP: nearestPlayer.currentHP,
+            maxHP: nearestPlayer.maxHP,
+          });
+
+          setTimeout(() => (m.attacking = false), 400);
+        }
+
+      // 🧭 If had aggro but lost target, return home
+      } else if (m.aggro) {
+        const dx = m.x - m.spawnX;
+        const dy = m.y - m.spawnY;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist > LEASH_RADIUS) {
+          m.aggro = false;
+          m.targetId = "";
+        }
+
+      // 💤 Idle / Return to spawn
+      } else {
+        const dx = m.spawnX - m.x;
+        const dy = m.spawnY - m.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist > 10) {
+          m.x += dx * 0.05;
+          m.y += dy * 0.05;
           m.direction =
             Math.abs(dx) > Math.abs(dy)
               ? dx < 0
@@ -392,78 +457,18 @@ class MMORPGRoom extends Room {
               : dy < 0
               ? "up"
               : "down";
-
           m.moving = true;
-
-          if (
-            dist < ATTACK_RADIUS &&
-            (!m._lastAttack || Date.now() - m._lastAttack > ATTACK_COOLDOWN)
-          ) {
-            m._lastAttack = Date.now();
-            m.attacking = true;
-
-            const damage = Math.max(1, m.attack - nearestPlayer.defense);
-            nearestPlayer.currentHP = Math.max(
-              0,
-              nearestPlayer.currentHP - damage
-            );
-
-            this.broadcast("monster_attack", {
-              monsterId: m.id,
-              targetId: m.targetId,
-              damage,
-              newHP: nearestPlayer.currentHP,
-            });
-
-            this.broadcast("player_stats_update", {
-              id: m.targetId,
-              currentHP: nearestPlayer.currentHP,
-              maxHP: nearestPlayer.maxHP,
-            });
-
-            setTimeout(() => (m.attacking = false), 400);
-          }
-        } else if (m.aggro) {
-          const dx = m.x - m.spawnX;
-          const dy = m.y - m.spawnY;
-          const dist = Math.sqrt(dx * dx + dy * dy);
-          if (dist > LEASH_RADIUS) {
-            m.aggro = false;
-            m.targetId = "";
-          }
         } else {
-          const dx = m.spawnX - m.x;
-          const dy = m.spawnY - m.y;
-          const dist = Math.sqrt(dx * dx + dy * dy);
-          if (dist > 10) {
-            m.x += dx * 0.05;
-            m.y += dy * 0.05;
-            m.direction =
-              Math.abs(dx) > Math.abs(dy)
-                ? dx < 0
-                  ? "left"
-                  : "right"
-                : dy < 0
-                ? "up"
-                : "down";
-            m.moving = true;
-          } else {
-            m.moving = false;
-          }
+          m.moving = false;
         }
+      }
 
-        this.broadcast("monster_update", {
-          id: m.id,
-          x: m.x,
-          y: m.y,
-          moving: m.moving,
-          attacking: m.attacking,
-          direction: m.direction,
-          currentHP: m.currentHP,
-        });
-      });
-    }, 300);
-  }
+      // ❌ Removed manual broadcast — schema handles this automatically!
+      // Colyseus will now sync m.x, m.y, m.direction, etc. automatically
+    });
+  }, 300);
+}
+
 
   // ============================================================
   // 👋 PLAYER JOIN
