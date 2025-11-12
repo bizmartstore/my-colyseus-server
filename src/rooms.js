@@ -252,42 +252,14 @@ class MMORPGRoom extends Room {
               setTimeout(() => {
                 const resp = new Monster();
                 Object.assign(resp, {
-                  id: m.id,
-                  name: m.name,
-                  class: m.class,
-                  level: m.level,
+                  ...m,
+                  currentHP: m.maxHP,
                   x: m.spawnX,
                   y: m.spawnY,
-                  spawnX: m.spawnX,
-                  spawnY: m.spawnY,
-                  currentHP: m.maxHP,
-                  maxHP: m.maxHP,
-                  attack: m.attack,
-                  defense: m.defense,
-                  speed: m.speed,
-                  critDamage: m.critDamage,
-                  mapID: m.mapID,
-                  idleLeft: m.idleLeft,
-                  idleRight: m.idleRight,
-                  idleUp: m.idleUp,
-                  idleDown: m.idleDown,
-                  walkLeft: m.walkLeft,
-                  walkRight: m.walkRight,
-                  walkUp: m.walkUp,
-                  walkDown: m.walkDown,
-                  attackLeft: m.attackLeft,
-                  attackRight: m.attackRight,
-                  attackUp: m.attackUp,
-                  attackDown: m.attackDown,
                 });
 
-                resp.aggroRadius = m.aggroRadius || 200;
-                resp.attackRange = m.attackRange || 40;
-                resp.leaveRadius = m.leaveRadius || 300;
-                resp.attackCooldown = m.attackCooldown || 1000;
-                resp._lastAttack = 0;
                 resp.targetId = null;
-
+                resp._lastAttack = 0;
                 this.state.monsters.set(resp.id, resp);
 
                 this.broadcast("monster_spawn", {
@@ -313,103 +285,13 @@ class MMORPGRoom extends Room {
       });
     });
 
-
-  // ============================================================
-  // 👋 PLAYER JOIN
-  // ============================================================
-  onJoin(client, options) {
-    const p = options.player || {};
-    console.log(`👋 ${p.Email || "Unknown"} joined MMORPG room.`);
-
-    const newPlayer = new Player();
-
-    // Basic info
-    newPlayer.email = p.Email || client.sessionId;
-    newPlayer.name = p.PlayerName || "Guest";
-    newPlayer.characterID = p.CharacterID || "C000";
-    newPlayer.characterName = p.CharacterName || "Unknown";
-    newPlayer.characterClass = p.CharacterClass || "Adventurer";
-
-    // Position
-    newPlayer.x = Number(p.PositionX) || 300;
-    newPlayer.y = Number(p.PositionY) || 200;
-    newPlayer.animation = p.MovementAnimation || "IdleFront";
-    newPlayer.mapID = Number(p.MapID) || 1;
-
-    // Stats
-    newPlayer.currentHP = Number(p.CurrentHP) || 100;
-    newPlayer.maxHP = Number(p.MaxHP) || 100;
-    newPlayer.currentMana = Number(p.CurrentMana) || 100;
-    newPlayer.maxMana = Number(p.MaxMana) || 100;
-    newPlayer.currentEXP = Number(p.CurrentEXP) || 0;
-    newPlayer.maxEXP = Number(p.MaxEXP) || 100;
-    newPlayer.attack = Number(p.Attack) || 10;
-    newPlayer.defense = Number(p.Defense) || 5;
-    newPlayer.speed = Number(p.Speed) || 8;
-    newPlayer.critDamage = Number(p.CritDamage) || 100;
-    newPlayer.level = Number(p.Level) || 1;
-
-    // Sprites
-    newPlayer.idleFront = p.ImageURL_IdleFront || "";
-    newPlayer.idleBack = p.ImageURL_IdleBack || "";
-    newPlayer.idleLeft = p.ImageURL_IdleLeft || "";
-    newPlayer.idleRight = p.ImageURL_IdleRight || "";
-    newPlayer.walkLeft = p.ImageURL_Walk_Left || "";
-    newPlayer.walkRight = p.ImageURL_Walk_Right || "";
-    newPlayer.walkUp = p.ImageURL_Walk_Up || "";
-    newPlayer.walkDown = p.ImageURL_Walk_Down || "";
-    newPlayer.attackLeft = p.ImageURL_Attack_Left || "";
-    newPlayer.attackRight = p.ImageURL_Attack_Right || "";
-    newPlayer.attackUp = p.ImageURL_Attack_Up || "";
-    newPlayer.attackDown = p.ImageURL_Attack_Down || "";
-
-    this.state.players.set(client.sessionId, newPlayer);
-
-    client.send("joined", {
-      sessionId: client.sessionId,
-      message: "✅ Welcome to MMORPG Room!",
-      currentMap: newPlayer.mapID,
-    });
-
-    this.broadcast("player_joined", {
-      id: client.sessionId,
-      name: newPlayer.name,
-      characterID: newPlayer.characterID,
-      characterName: newPlayer.characterName,
-      characterClass: newPlayer.characterClass,
-      x: newPlayer.x,
-      y: newPlayer.y,
-      direction: newPlayer.direction,
-      moving: newPlayer.moving,
-      attacking: newPlayer.attacking,
-      mapID: newPlayer.mapID,
-      // Include all sprites
-      idleFront: newPlayer.idleFront,
-      idleBack: newPlayer.idleBack,
-      idleLeft: newPlayer.idleLeft,
-      idleRight: newPlayer.idleRight,
-      walkLeft: newPlayer.walkLeft,
-      walkRight: newPlayer.walkRight,
-      walkUp: newPlayer.walkUp,
-      walkDown: newPlayer.walkDown,
-      attackLeft: newPlayer.attackLeft,
-      attackRight: newPlayer.attackRight,
-      attackUp: newPlayer.attackUp,
-      attackDown: newPlayer.attackDown,
-      // Stats
-      currentHP: newPlayer.currentHP,
-      maxHP: newPlayer.maxHP,
-      currentMana: newPlayer.currentMana,
-      maxMana: newPlayer.maxMana,
-      currentEXP: newPlayer.currentEXP,
-      maxEXP: newPlayer.maxEXP,
-      level: newPlayer.level,
-    });
-  }
-
+    // ============================================================
+    // 👋 PLAYER JOIN
+    // ============================================================
+    this.onJoin(client, options);
 
     // ============================================================
-    // 🧟 MONSTER UPDATE HANDLER (for AI or admin control)
+    // 🧟 MONSTER UPDATE HANDLER
     // ============================================================
     this.onMessage("monster_update", (client, data) => {
       const m = this.state.monsters.get(data.id);
@@ -459,11 +341,10 @@ class MMORPGRoom extends Room {
     });
 
     // ============================================================
-    // 🧩 INIT: Spawn Monsters on Room Start
+    // 🧩 INIT: Spawn Monsters
     // ============================================================
     this.spawnDefaultMonsters();
     this.startMonsterAI();
-
 
     // ============================================================
     // 🧠 STATE PATCH SYNC (20 FPS)
