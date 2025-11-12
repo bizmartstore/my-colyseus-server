@@ -115,6 +115,10 @@ class Monster extends Schema {
     this.speed = 5;
     this.critDamage = 100;
     this.mapID = 1;
+    this.spawnX = 0;
+    this.spawnY = 0;
+    this.targetId = "";
+    this.aggro = false;
 
     // ✅ Monster Sprite URLs
     this.idleLeft = "";
@@ -149,6 +153,10 @@ defineTypes(Monster, {
   speed: "number",
   critDamage: "number",
   mapID: "number",
+  spawnX: "number",
+  spawnY: "number",
+  targetId: "string",
+  aggro: "boolean",
   idleLeft: "string",
   idleRight: "string",
   idleUp: "string",
@@ -284,7 +292,6 @@ class MMORPGRoom extends Room {
     // ============================================================
     this.spawnDefaultMonsters();
     this.startMonsterAI();
-    this.startMonsterBattleAI();
 
     // ============================================================
     // 🧠 STATE PATCH SYNC (20 FPS)
@@ -326,230 +333,137 @@ class MMORPGRoom extends Room {
     for (const m of monsters) {
       const monster = new Monster();
       Object.assign(monster, m);
+      monster.spawnX = m.x;
+      monster.spawnY = m.y;
+      monster.aggro = false;
+      monster.targetId = "";
       this.state.monsters.set(m.id, monster);
     }
 
     console.log(`🧟 Spawned ${this.state.monsters.size} monsters`);
   }
 
-// ============================================================
-// 🧠 SIMPLE MONSTER AI — random wandering within small radius
-// ============================================================
-startMonsterAI() {
-  const moveMonster = (m) => {
-    if (!m) return;
+  // ============================================================
+  // 🧠 MONSTER AI — Aggro / Attack / Return
+  // ============================================================
+  startMonsterAI() {
+    const AGGRO_RADIUS = 200;
+    const ATTACK_RADIUS = 50;
+    const LEASH_RADIUS = 350;
+    const ATTACK_COOLDOWN = 1500;
 
-    // ✅ Define small random wander radius
-    const radius = 40; // smaller distance = more natural idle pacing
-    if (!m.spawnX) m.spawnX = m.x;
-    if (!m.spawnY) m.spawnY = m.y;
+    setInterval(() => {
+      this.state.monsters.forEach((m) => {
+        if (m.currentHP <= 0) return;
 
-    // ✅ Choose random target within small radius
-    const newX = m.spawnX + (Math.random() * 2 - 1) * radius;
-    const newY = m.spawnY + (Math.random() * 2 - 1) * radius;
+        let nearestPlayer = null;
+        let nearestDist = Infinity;
 
-    // ✅ Pick direction based on target offset
-    const dx = newX - m.x;
-    const dy = newY - m.y;
-    const absX = Math.abs(dx);
-    const absY = Math.abs(dy);
-
-    if (absX > absY) {
-      m.direction = dx < 0 ? "left" : "right";
-    } else {
-      m.direction = dy < 0 ? "up" : "down";
-    }
-
-    m.moving = true;
-
-    // ✅ Smooth movement (simulate walking)
-    const steps = 25;
-    let step = 0;
-    const stepInterval = setInterval(() => {
-      step++;
-      m.x += dx / steps;
-      m.y += dy / steps;
-
-      // Broadcast monster movement in real time
-      this.broadcast("monster_update", {
-        id: m.id,
-        x: m.x,
-        y: m.y,
-        direction: m.direction,
-        moving: true,
-      });
-
-      // ✅ Stop after finishing movement
-      if (step >= steps) {
-        clearInterval(stepInterval);
-        m.moving = false;
-
-        // ✅ After moving, set proper idle direction sprite
-        let idleDirection = "idleDown";
-        switch (m.direction) {
-          case "left":  idleDirection = "idleLeft"; break;
-          case "right": idleDirection = "idleRight"; break;
-          case "up":    idleDirection = "idleUp"; break;
-          case "down":  idleDirection = "idleDown"; break;
-        }
-
-        this.broadcast("monster_update", {
-          id: m.id,
-          moving: false,
-          direction: m.direction,
-          currentAnimation: idleDirection,
+        this.state.players.forEach((p) => {
+          if (!p || p.mapID !== m.mapID) return;
+          const dx = p.x - m.x;
+          const dy = p.y - m.y;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          if (dist < nearestDist) {
+            nearestDist = dist;
+            nearestPlayer = p;
+          }
         });
 
-        // ⏳ Wait 5 seconds before moving again
-        setTimeout(() => moveMonster(m), 5000);
-      }
-    }, 150);
-  };
+        if (nearestPlayer && nearestDist < AGGRO_RADIUS) {
+          m.aggro = true;
+          m.targetId = nearestPlayer.$sessionId;
 
-  // ✅ Start the wandering loop for each monster
-  this.state.monsters.forEach((m) => {
-    setTimeout(() => moveMonster(m), 1000 + Math.random() * 2000);
-  });
-}
+          const dx = nearestPlayer.x - m.x;
+          const dy = nearestPlayer.y - m.y;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          if (dist > 0) {
+            const nx = dx / dist;
+            const ny = dy / dist;
+            m.x += nx * (m.speed / 2);
+            m.y += ny * (m.speed / 2);
+          }
 
+          m.direction =
+            Math.abs(dx) > Math.abs(dy)
+              ? dx < 0
+                ? "left"
+                : "right"
+              : dy < 0
+              ? "up"
+              : "down";
 
-// =========================== 🧠 Monster Battle AI ===========================
-startMonsterBattleAI() {
-  const AGGRO_RANGE = 150;       // how close before monster chases
-  const DISENGAGE_RANGE = 300;   // how far before monster returns
-  const ATTACK_RANGE = 40;       // attack distance threshold
-  const ATTACK_INTERVAL = 1500;  // ms between attacks
+          m.moving = true;
 
-  setInterval(() => {
-    // Loop through all monsters
-    this.state.monsters.forEach((m) => {
-      if (m.currentHP <= 0) return; // Skip dead monsters
+          if (
+            dist < ATTACK_RADIUS &&
+            (!m._lastAttack || Date.now() - m._lastAttack > ATTACK_COOLDOWN)
+          ) {
+            m._lastAttack = Date.now();
+            m.attacking = true;
 
-      // ==========================
-      // 🔍 FIND NEAREST PLAYER
-      // ==========================
-      let nearestPlayer = null;
-      let nearestPlayerId = null;
-      let nearestDist = Infinity;
+            const damage = Math.max(1, m.attack - nearestPlayer.defense);
+            nearestPlayer.currentHP = Math.max(
+              0,
+              nearestPlayer.currentHP - damage
+            );
 
-      this.state.players.forEach((p, sessionId) => {
-        if (p.mapID !== m.mapID) return; // skip if on different map
+            this.broadcast("monster_attack", {
+              monsterId: m.id,
+              targetId: m.targetId,
+              damage,
+              newHP: nearestPlayer.currentHP,
+            });
 
-        const dx = p.x - m.x;
-        const dy = p.y - m.y;
-        const dist = Math.sqrt(dx * dx + dy * dy);
+            this.broadcast("player_stats_update", {
+              id: m.targetId,
+              currentHP: nearestPlayer.currentHP,
+              maxHP: nearestPlayer.maxHP,
+            });
 
-        if (dist < nearestDist) {
-          nearestDist = dist;
-          nearestPlayer = p;
-          nearestPlayerId = sessionId;
-        }
-      });
-
-      if (!nearestPlayer || !nearestPlayerId) {
-        // No players nearby
-        m.moving = false;
-        return;
-      }
-
-      // ==============================
-      // 🧭 MONSTER AGGRO / CHASE LOGIC
-      // ==============================
-      if (nearestDist < AGGRO_RANGE) {
-        // Move toward player
-        const dx = nearestPlayer.x - m.x;
-        const dy = nearestPlayer.y - m.y;
-        const len = Math.sqrt(dx * dx + dy * dy) || 1;
-
-        m.x += (dx / len) * m.speed * 0.9;
-        m.y += (dy / len) * m.speed * 0.9;
-
-        // Face toward target
-        m.direction =
-          Math.abs(dx) > Math.abs(dy)
-            ? (dx < 0 ? "left" : "right")
-            : (dy < 0 ? "up" : "down");
-        m.moving = true;
-
-        // ✅ Recompute distance after movement for accurate attack
-        const newDx = nearestPlayer.x - m.x;
-        const newDy = nearestPlayer.y - m.y;
-        const newDist = Math.sqrt(newDx * newDx + newDy * newDy) || 0;
-
-        // ==========================
-        // ⚔️ ATTACK WHEN IN RANGE
-        // ==========================
-        if (
-          newDist < ATTACK_RANGE &&
-          (!m._lastAttackTime || Date.now() - m._lastAttackTime > ATTACK_INTERVAL)
-        ) {
-          m._lastAttackTime = Date.now();
-          m.attacking = true;
-
-          // 🩸 Damage Calculation
-          const rawDmg = Math.max(1, m.attack - nearestPlayer.defense);
-          nearestPlayer.currentHP = Math.max(0, nearestPlayer.currentHP - rawDmg);
-
-          // 📡 Broadcast attack event
-          this.broadcast("monster_attack", {
-            monsterId: m.id,
-            targetSessionId: nearestPlayerId,
-            targetId: nearestPlayer.email || "",
-            damage: rawDmg,
-            playerHP: nearestPlayer.currentHP,
-          });
-
-          // 🔁 Sync player HP
-          this.broadcast("player_stats_update", {
-            id: nearestPlayerId,
-            email: nearestPlayer.email || "",
-            currentHP: nearestPlayer.currentHP,
-            maxHP: nearestPlayer.maxHP,
-          });
-
-          // Stop attack animation
-          setTimeout(() => {
-            m.attacking = false;
-          }, 400);
-        }
-      }
-
-      // ==============================
-      // 😴 RETURN TO SPAWN IF TOO FAR
-      // ==============================
-      else if (nearestDist > DISENGAGE_RANGE) {
-        if (m.spawnX && m.spawnY) {
+            setTimeout(() => (m.attacking = false), 400);
+          }
+        } else if (m.aggro) {
+          const dx = m.x - m.spawnX;
+          const dy = m.y - m.spawnY;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          if (dist > LEASH_RADIUS) {
+            m.aggro = false;
+            m.targetId = "";
+          }
+        } else {
           const dx = m.spawnX - m.x;
           const dy = m.spawnY - m.y;
           const dist = Math.sqrt(dx * dx + dy * dy);
-
-          if (dist > 2) {
+          if (dist > 10) {
             m.x += dx * 0.05;
             m.y += dy * 0.05;
+            m.direction =
+              Math.abs(dx) > Math.abs(dy)
+                ? dx < 0
+                  ? "left"
+                  : "right"
+                : dy < 0
+                ? "up"
+                : "down";
             m.moving = true;
           } else {
             m.moving = false;
           }
         }
-      }
 
-      // ==============================
-      // 🔁 SYNC MONSTER STATE TO CLIENTS
-      // ==============================
-      this.broadcast("monster_update", {
-        id: m.id,
-        x: m.x,
-        y: m.y,
-        direction: m.direction,
-        moving: m.moving,
-        attacking: m.attacking,
-        currentHP: m.currentHP,
+        this.broadcast("monster_update", {
+          id: m.id,
+          x: m.x,
+          y: m.y,
+          moving: m.moving,
+          attacking: m.attacking,
+          direction: m.direction,
+          currentHP: m.currentHP,
+        });
       });
-    });
-  }, 300);
-}
-
-
+    }, 300);
+  }
 
   // ============================================================
   // 👋 PLAYER JOIN
@@ -560,20 +474,17 @@ startMonsterBattleAI() {
 
     const newPlayer = new Player();
 
-    // Basic info
     newPlayer.email = p.Email || client.sessionId;
     newPlayer.name = p.PlayerName || "Guest";
     newPlayer.characterID = p.CharacterID || "C000";
     newPlayer.characterName = p.CharacterName || "Unknown";
     newPlayer.characterClass = p.CharacterClass || "Adventurer";
 
-    // Position
     newPlayer.x = Number(p.PositionX) || 300;
     newPlayer.y = Number(p.PositionY) || 200;
     newPlayer.animation = p.MovementAnimation || "IdleFront";
     newPlayer.mapID = Number(p.MapID) || 1;
 
-    // Stats
     newPlayer.currentHP = Number(p.CurrentHP) || 100;
     newPlayer.maxHP = Number(p.MaxHP) || 100;
     newPlayer.currentMana = Number(p.CurrentMana) || 100;
@@ -586,7 +497,6 @@ startMonsterBattleAI() {
     newPlayer.critDamage = Number(p.CritDamage) || 100;
     newPlayer.level = Number(p.Level) || 1;
 
-    // Sprites
     newPlayer.idleFront = p.ImageURL_IdleFront || "";
     newPlayer.idleBack = p.ImageURL_IdleBack || "";
     newPlayer.idleLeft = p.ImageURL_IdleLeft || "";
@@ -620,7 +530,6 @@ startMonsterBattleAI() {
       moving: newPlayer.moving,
       attacking: newPlayer.attacking,
       mapID: newPlayer.mapID,
-      // Include all sprites
       idleFront: newPlayer.idleFront,
       idleBack: newPlayer.idleBack,
       idleLeft: newPlayer.idleLeft,
@@ -633,7 +542,6 @@ startMonsterBattleAI() {
       attackRight: newPlayer.attackRight,
       attackUp: newPlayer.attackUp,
       attackDown: newPlayer.attackDown,
-      // Stats
       currentHP: newPlayer.currentHP,
       maxHP: newPlayer.maxHP,
       currentMana: newPlayer.currentMana,
