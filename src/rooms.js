@@ -163,6 +163,7 @@ defineTypes(Monster, {
   attackDown: "string",
 });
 
+
 // ============================================================
 // 🌍 Game State Schema
 // ============================================================
@@ -177,6 +178,34 @@ defineTypes(State, {
   players: { map: Player },
   monsters: { map: Monster },
 });
+
+
+// ============================================================
+// 🧮 HELPER FUNCTIONS (for AI movement / direction / distance)
+// ============================================================
+function distance(ax, ay, bx, by) {
+  const dx = ax - bx;
+  const dy = ay - by;
+  return Math.sqrt(dx * dx + dy * dy);
+}
+
+function moveToward(monster, targetX, targetY, speed) {
+  const dx = targetX - monster.x;
+  const dy = targetY - monster.y;
+  const len = Math.sqrt(dx * dx + dy * dy);
+  if (len === 0) return;
+  const step = Math.min(speed, len);
+  monster.x += (dx / len) * step;
+  monster.y += (dy / len) * step;
+}
+
+function directionTo(monster, targetX, targetY) {
+  const dx = targetX - monster.x;
+  const dy = targetY - monster.y;
+  if (Math.abs(dx) > Math.abs(dy)) return dx > 0 ? "right" : "left";
+  return dy > 0 ? "down" : "up";
+}
+
 
 // ============================================================
 // 🎮 MMORPG Room
@@ -228,6 +257,37 @@ class MMORPGRoom extends Room {
         mapID: player.mapID,
       });
     });
+
+// ============================================================
+// ⚔️ PLAYER → MONSTER ATTACK HANDLER
+// ============================================================
+this.onMessage("player_attack_monster", (client, data) => {
+  const player = this.state.players.get(client.sessionId);
+  if (!player) return;
+
+  const monster = this.state.monsters.get(data.monsterId);
+  if (!monster) return;
+
+  const dist = distance(player.x, player.y, monster.x, monster.y);
+  if (dist > 80) return; // too far to hit
+
+  const damage = Math.max(1, player.attack - monster.defense);
+  monster.currentHP -= damage;
+
+  this.broadcast("monster_update", {
+    id: monster.id,
+    currentHP: monster.currentHP,
+  });
+
+  // check monster death
+  if (monster.currentHP <= 0) {
+    this.handleMonsterDeath(monster);
+  }
+});
+
+
+
+
 
     // ============================================================
     // 🧟 MONSTER UPDATE HANDLER (for AI or admin control)
@@ -284,6 +344,7 @@ class MMORPGRoom extends Room {
     // ============================================================
     this.spawnDefaultMonsters();
     this.startMonsterAI();
+    this.startAggroAI(); // 🧠 Start monster combat logic
 
 
     // ============================================================
@@ -397,6 +458,124 @@ startMonsterAI() {
     setTimeout(() => moveMonster(m), 1000 + Math.random() * 2000);
   });
 }
+
+
+// ============================================================
+// 🧠 ADVANCED MONSTER AGGRO + ATTACK AI
+// ============================================================
+startAggroAI() {
+  const AGGRO_RANGE = 200;
+  const ATTACK_RANGE = 40;
+  const ATTACK_INTERVAL = 1500; // 1.5s
+  const RETURN_DISTANCE = 250;
+
+  setInterval(() => {
+    this.state.monsters.forEach((m) => {
+      if (!m.spawnX) m.spawnX = m.x;
+      if (!m.spawnY) m.spawnY = m.y;
+
+      // if monster dead, skip
+      if (m.currentHP <= 0) return;
+
+      // find nearest player in same map
+      let target = null;
+      let nearestDist = Infinity;
+      this.state.players.forEach((p) => {
+        if (p.mapID !== m.mapID) return;
+        const d = distance(m.x, m.y, p.x, p.y);
+        if (d < nearestDist) {
+          nearestDist = d;
+          target = p;
+        }
+      });
+
+      if (target && nearestDist < AGGRO_RANGE) {
+        // 🧠 Chase or attack
+        m.moving = true;
+        m.direction = directionTo(m, target.x, target.y);
+
+        if (nearestDist > ATTACK_RANGE) {
+          moveToward(m, target.x, target.y, m.speed);
+        } else {
+          // 🗡️ Attack player
+          if (!m._nextAttack || Date.now() > m._nextAttack) {
+            m._nextAttack = Date.now() + ATTACK_INTERVAL;
+            m.attacking = true;
+
+            // Damage player
+            const damage = Math.max(1, m.attack - target.defense);
+            target.currentHP = Math.max(0, target.currentHP - damage);
+
+            this.broadcast("monster_attack", {
+              monsterId: m.id,
+              targetId: target.email,
+              damage,
+              remainingHP: target.currentHP,
+            });
+
+            // sync player stats
+            this.broadcast("player_stats_update", {
+              id: [...this.state.players.entries()].find(([id, p]) => p === target)?.[0],
+              currentHP: target.currentHP,
+              maxHP: target.maxHP,
+            });
+          }
+        }
+      } else {
+        // 💤 No player nearby — return to spawn
+        const distToSpawn = distance(m.x, m.y, m.spawnX, m.spawnY);
+        if (distToSpawn > 5) {
+          m.direction = directionTo(m, m.spawnX, m.spawnY);
+          moveToward(m, m.spawnX, m.spawnY, m.speed);
+          m.moving = true;
+        } else {
+          m.moving = false;
+          m.attacking = false;
+        }
+      }
+
+      // ✅ Broadcast monster state update
+      this.broadcast("monster_update", {
+        id: m.id,
+        x: m.x,
+        y: m.y,
+        direction: m.direction,
+        moving: m.moving,
+        attacking: m.attacking,
+        currentHP: m.currentHP,
+      });
+    });
+  }, 300);
+}
+
+
+// ============================================================
+// 💀 MONSTER DEATH + RESPAWN
+// ============================================================
+handleMonsterDeath(monster) {
+  monster.currentHP = 0;
+  monster.moving = false;
+  monster.attacking = false;
+
+  this.broadcast("monster_dead", { id: monster.id });
+
+  // Respawn after delay
+  setTimeout(() => {
+    monster.currentHP = monster.maxHP;
+    monster.x = monster.spawnX;
+    monster.y = monster.spawnY;
+    monster.moving = false;
+    monster.attacking = false;
+
+    this.broadcast("monster_update", {
+      id: monster.id,
+      x: monster.x,
+      y: monster.y,
+      currentHP: monster.currentHP,
+    });
+  }, 8000); // respawn after 8s
+}
+
 
   // ============================================================
   // 👋 PLAYER JOIN
