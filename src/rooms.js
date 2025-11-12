@@ -414,7 +414,6 @@ startMonsterAI() {
 
 
 // =========================== 🧠 Monster Battle AI ===========================
-// Replace your startMonsterBattleAI() with this improved version
 startMonsterBattleAI() {
   const AGGRO_RANGE = 150;
   const DISENGAGE_RANGE = 300;
@@ -426,7 +425,7 @@ startMonsterBattleAI() {
 
       // Find nearest player — capture sessionId too
       let nearestPlayer = null;
-      let nearestPlayerId = null;      // <-- store sessionId (map key)
+      let nearestPlayerId = null; // <-- store sessionId (map key)
       let nearestDist = Infinity;
 
       // forEach provides (player, sessionId) if you use two args
@@ -438,24 +437,27 @@ startMonsterBattleAI() {
         if (dist < nearestDist) {
           nearestDist = dist;
           nearestPlayer = p;
-          nearestPlayerId = sessionId;  // <-- remember the session id
+          nearestPlayerId = sessionId; // <-- remember the session id
         }
       });
 
+      // ✅ FIX: 'return' instead of 'continue' (legal inside forEach callback)
       if (!nearestPlayer || !nearestPlayerId) {
-        // no players in this map
-        // optional: reset behavior
-        continue;
+        // no players in this map — do nothing for this monster
+        return; // exit current monster iteration safely
       }
 
+      // ==============================
+      // 🧭 MONSTER AGGRO / CHASE LOGIC
+      // ==============================
       if (nearestDist < AGGRO_RANGE) {
         // Move toward nearest player
         const dx = nearestPlayer.x - m.x;
         const dy = nearestPlayer.y - m.y;
         const len = Math.sqrt(dx * dx + dy * dy) || 1;
 
-        // tune movement speed per tick; multiplying by delta-like factor helps
-        m.x += (dx / len) * m.speed * 0.9; // slightly faster than before
+        // Move slightly faster for smoother chasing
+        m.x += (dx / len) * m.speed * 0.9;
         m.y += (dy / len) * m.speed * 0.9;
 
         // Update facing direction
@@ -465,23 +467,29 @@ startMonsterBattleAI() {
             : (dy < 0 ? "up" : "down");
         m.moving = true;
 
-        // Attack when close
+        // ==========================
+        // ⚔️ ATTACK WHEN IN RANGE
+        // ==========================
         if (
           nearestDist < 40 &&
-          (!m._lastAttackTime || Date.now() - m._lastAttackTime > ATTACK_INTERVAL)
+          (!m._lastAttackTime ||
+            Date.now() - m._lastAttackTime > ATTACK_INTERVAL)
         ) {
           m._lastAttackTime = Date.now();
           m.attacking = true;
 
           // Calculate damage
           const rawDmg = Math.max(1, m.attack - nearestPlayer.defense);
-          nearestPlayer.currentHP = Math.max(0, nearestPlayer.currentHP - rawDmg);
+          nearestPlayer.currentHP = Math.max(
+            0,
+            nearestPlayer.currentHP - rawDmg
+          );
 
           // Broadcast attack event — include both sessionId (id) and email
           this.broadcast("monster_attack", {
             monsterId: m.id,
-            targetSessionId: nearestPlayerId,    // reliable identifier for server<>client session
-            targetId: nearestPlayer.email || "", // optional friendly identifier (email)
+            targetSessionId: nearestPlayerId, // reliable identifier for session
+            targetId: nearestPlayer.email || "", // optional readable identifier
             damage: rawDmg,
             playerHP: nearestPlayer.currentHP,
           });
@@ -495,10 +503,15 @@ startMonsterBattleAI() {
           });
 
           // Stop attack animation after short delay
-          setTimeout(() => { m.attacking = false; }, 400);
+          setTimeout(() => {
+            m.attacking = false;
+          }, 400);
         }
-      } else if (nearestDist > DISENGAGE_RANGE) {
-        // return to spawn point
+      }
+      // ==============================
+      // 😴 RETURN TO SPAWN IF TOO FAR
+      // ==============================
+      else if (nearestDist > DISENGAGE_RANGE) {
         if (m.spawnX && m.spawnY) {
           const dx = m.spawnX - m.x;
           const dy = m.spawnY - m.y;
@@ -514,7 +527,9 @@ startMonsterBattleAI() {
         }
       }
 
-      // Sync monster state to clients
+      // ==============================
+      // 🔁 SYNC MONSTER STATE TO CLIENTS
+      // ==============================
       this.broadcast("monster_update", {
         id: m.id,
         x: m.x,
