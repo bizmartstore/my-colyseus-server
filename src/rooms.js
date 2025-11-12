@@ -284,7 +284,7 @@ class MMORPGRoom extends Room {
     // ============================================================
     this.spawnDefaultMonsters();
     this.startMonsterAI();
-
+    this.startMonsterBattleAI();
 
     // ============================================================
     // 🧠 STATE PATCH SYNC (20 FPS)
@@ -334,9 +334,6 @@ class MMORPGRoom extends Room {
 
 // ============================================================
 // 🧠 SIMPLE MONSTER AI — random wandering within small radius
-// ============================================================
-// ============================================================
-// 🧠 SIMPLE MONSTER AI — smooth small moves + 5s idle + correct facing
 // ============================================================
 startMonsterAI() {
   const moveMonster = (m) => {
@@ -414,6 +411,105 @@ startMonsterAI() {
     setTimeout(() => moveMonster(m), 1000 + Math.random() * 2000);
   });
 }
+
+
+// =========================== 🧠 Monster Battle AI ===========================
+startMonsterBattleAI() {
+  const AGGRO_RANGE = 150;
+  const DISENGAGE_RANGE = 300;
+  const ATTACK_INTERVAL = 1500; // ms between attacks
+
+  setInterval(() => {
+    this.state.monsters.forEach((m) => {
+      if (m.currentHP <= 0) return; // dead
+
+      // Find nearest player
+      let nearestPlayer = null;
+      let nearestDist = Infinity;
+      this.state.players.forEach((p) => {
+        if (p.mapID !== m.mapID) return;
+        const dx = p.x - m.x;
+        const dy = p.y - m.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist < nearestDist) {
+          nearestDist = dist;
+          nearestPlayer = p;
+        }
+      });
+
+      if (!nearestPlayer) return;
+
+      // 🧭 Check aggression distance
+      if (nearestDist < AGGRO_RANGE) {
+        // Move toward player
+        const dx = nearestPlayer.x - m.x;
+        const dy = nearestPlayer.y - m.y;
+        const len = Math.sqrt(dx * dx + dy * dy) || 1;
+        m.x += (dx / len) * m.speed * 0.6;
+        m.y += (dy / len) * m.speed * 0.6;
+
+        // Direction
+        m.direction =
+          Math.abs(dx) > Math.abs(dy)
+            ? dx < 0 ? "left" : "right"
+            : dy < 0 ? "up" : "down";
+        m.moving = true;
+
+        // 🗡️ Attack when close
+        if (nearestDist < 40 && !m._lastAttackTime || Date.now() - m._lastAttackTime > ATTACK_INTERVAL) {
+          m._lastAttackTime = Date.now();
+          m.attacking = true;
+
+          const rawDmg = Math.max(1, m.attack - nearestPlayer.defense);
+          nearestPlayer.currentHP = Math.max(0, nearestPlayer.currentHP - rawDmg);
+
+          this.broadcast("monster_attack", {
+            monsterId: m.id,
+            targetId: nearestPlayer.email,
+            damage: rawDmg,
+            playerHP: nearestPlayer.currentHP,
+          });
+
+          // Sync HP back to all players
+          this.broadcast("player_stats_update", {
+            id: nearestPlayer.sessionId,
+            currentHP: nearestPlayer.currentHP,
+            maxHP: nearestPlayer.maxHP,
+          });
+
+          setTimeout(() => (m.attacking = false), 400);
+        }
+      } 
+      // 😴 Out of range → return to spawn
+      else if (nearestDist > DISENGAGE_RANGE) {
+        if (m.spawnX && m.spawnY) {
+          const dx = m.spawnX - m.x;
+          const dy = m.spawnY - m.y;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          if (dist > 2) {
+            m.x += dx * 0.05;
+            m.y += dy * 0.05;
+            m.moving = true;
+          } else {
+            m.moving = false;
+          }
+        }
+      }
+
+      // Sync updates to clients
+      this.broadcast("monster_update", {
+        id: m.id,
+        x: m.x,
+        y: m.y,
+        direction: m.direction,
+        moving: m.moving,
+        attacking: m.attacking,
+        currentHP: m.currentHP,
+      });
+    });
+  }, 300);
+}
+
 
   // ============================================================
   // 👋 PLAYER JOIN
