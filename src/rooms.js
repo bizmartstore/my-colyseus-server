@@ -345,7 +345,7 @@ class MMORPGRoom extends Room {
 
 
 // ============================================================
-// 🧠 SIMPLE MONSTER AI — random wandering within small radius
+// 🧠 SIMPLE MONSTER AI — chase, attack, and wander
 // ============================================================
 startMonsterAI() {
   const TICK_MS = 200;
@@ -357,38 +357,64 @@ startMonsterAI() {
       if (!m.spawnX) m.spawnX = m.x;
       if (!m.spawnY) m.spawnY = m.y;
 
-      const players = Array.from(this.state.players.values());
+      // ✅ Keep player sessionIds so lookup works
+      const playerEntries = Array.from(this.state.players.entries());
       let target = m.targetId ? this.state.players.get(m.targetId) : null;
 
-      // Acquire new target if none
+      // ✅ Acquire new target if none
       if (!target) {
-        let nearest = null, nearestDist = Infinity;
-        players.forEach((p) => {
+        let nearest = null;
+        let nearestDist = Infinity;
+        for (const [pid, p] of playerEntries) {
           const dist = Math.hypot(p.x - m.x, p.y - m.y);
           if (dist < m.aggroRadius && dist < nearestDist) {
-            nearest = p;
+            nearest = { id: pid, player: p, dist };
             nearestDist = dist;
           }
-        });
-        if (nearest) m.targetId = nearest.email || nearest.sessionId;
-        target = nearest;
+        }
+        if (nearest) {
+          m.targetId = nearest.id; // ✅ use sessionId, not email
+          target = nearest.player;
+        }
       }
 
-      // If has target → chase or attack
+      // ✅ If has a target → chase or attack
       if (target) {
         const dx = target.x - m.x;
         const dy = target.y - m.y;
         const dist = Math.hypot(dx, dy);
 
+        // ✅ Determine direction for sprite facing
+        if (Math.abs(dx) > Math.abs(dy)) {
+          m.direction = dx < 0 ? "left" : "right";
+        } else {
+          m.direction = dy < 0 ? "up" : "down";
+        }
+
         if (dist > m.leaveRadius) {
-          // player too far → reset target
+          // too far → forget target
           m.targetId = null;
+          m.moving = false;
+          m.attacking = false;
+          this.broadcast("monster_update", {
+            id: m.id,
+            moving: false,
+            attacking: false,
+            direction: m.direction,
+          });
         } else if (dist <= m.attackRange) {
-          // attack
+          // ✅ attack
           if (now - m._lastAttack > m.attackCooldown) {
             m._lastAttack = now;
             m.attacking = true;
-            this.broadcast("monster_update", { id: m.id, attacking: true });
+            m.moving = false;
+
+            this.broadcast("monster_update", {
+              id: m.id,
+              attacking: true,
+              moving: false,
+              direction: m.direction,
+            });
 
             const damage = Math.max(1, m.attack - target.defense * 0.5);
             target.currentHP = Math.max(0, target.currentHP - damage);
@@ -398,21 +424,35 @@ startMonsterAI() {
               currentHP: target.currentHP,
             });
 
+            // ✅ end attack animation after short delay
             setTimeout(() => {
               m.attacking = false;
-              this.broadcast("monster_update", { id: m.id, attacking: false });
-            }, 300);
+              this.broadcast("monster_update", {
+                id: m.id,
+                attacking: false,
+                direction: m.direction,
+              });
+            }, 400);
           }
         } else {
-          // chase movement
+          // ✅ chase movement
           const step = Math.min(m.speed * (TICK_MS / 1000) * 1.5, dist);
           m.x += (dx / dist) * step;
           m.y += (dy / dist) * step;
           m.moving = true;
-          this.broadcast("monster_update", { id: m.id, x: m.x, y: m.y, moving: true });
+          m.attacking = false;
+
+          this.broadcast("monster_update", {
+            id: m.id,
+            x: m.x,
+            y: m.y,
+            moving: true,
+            attacking: false,
+            direction: m.direction,
+          });
         }
       } else {
-        // No target → random wandering
+        // ✅ No target → random wandering
         if (!m._nextWander || now > m._nextWander) {
           m._nextWander = now + 3000 + Math.random() * 4000;
           const radius = 80;
@@ -426,15 +466,36 @@ startMonsterAI() {
           const dx = m._wanderTarget.x - m.x;
           const dy = m._wanderTarget.y - m.y;
           const dist = Math.hypot(dx, dy);
+
+          // choose facing direction while wandering
+          if (Math.abs(dx) > Math.abs(dy)) {
+            m.direction = dx < 0 ? "left" : "right";
+          } else {
+            m.direction = dy < 0 ? "up" : "down";
+          }
+
           if (dist > 5) {
             const step = Math.min(m.speed * (TICK_MS / 1000), dist);
             m.x += (dx / dist) * step;
             m.y += (dy / dist) * step;
             m.moving = true;
-            this.broadcast("monster_update", { id: m.id, x: m.x, y: m.y, moving: true });
+
+            this.broadcast("monster_update", {
+              id: m.id,
+              x: m.x,
+              y: m.y,
+              moving: true,
+              attacking: false,
+              direction: m.direction,
+            });
           } else {
             m.moving = false;
-            this.broadcast("monster_update", { id: m.id, moving: false });
+            this.broadcast("monster_update", {
+              id: m.id,
+              moving: false,
+              attacking: false,
+              direction: m.direction,
+            });
           }
         }
       }
@@ -445,6 +506,126 @@ startMonsterAI() {
 
   tick();
 }
+
+
+// ---------- extend player attack handler so players can damage monsters ----------
+this.onMessage("attack", (client, data) => {
+  const player = this.state.players.get(client.sessionId);
+  if (!player) return;
+
+  // ✅ if targetId provided, apply damage to monster
+  if (data && data.targetId) {
+    const m = this.state.monsters.get(data.targetId);
+    if (m && m.mapID === player.mapID) {
+      // ✅ validate distance server-side (anti-cheat)
+      const dx = m.x - player.x;
+      const dy = m.y - player.y;
+      const distance = Math.sqrt(dx * dx + dy * dy);
+      const VALID_RANGE = 48; // adjust for sprite sizes
+
+      if (distance <= VALID_RANGE) {
+        const raw = Number(data.damage || player.attack || 5);
+        const mitigated = Math.max(1, raw - (m.defense || 0));
+        m.currentHP = Math.max(0, Number(m.currentHP || 0) - mitigated);
+
+        // ✅ Make monster face attacker when hit
+        if (Math.abs(dx) > Math.abs(dy)) {
+          m.direction = dx < 0 ? "left" : "right";
+        } else {
+          m.direction = dy < 0 ? "up" : "down";
+        }
+
+        // ✅ Broadcast monster HP & animation updates
+        this.broadcast("monster_update", {
+          id: m.id,
+          currentHP: m.currentHP,
+          x: m.x,
+          y: m.y,
+          moving: false,
+          attacking: false,
+          direction: m.direction,
+        });
+
+        // ✅ Handle monster death
+        if (m.currentHP <= 0) {
+          this.broadcast("monster_dead", {
+            id: m.id,
+            killer: client.sessionId,
+            mapID: m.mapID,
+          });
+
+          // remove from state
+          this.state.monsters.delete(m.id);
+
+          // ✅ Respawn after 8 seconds
+          setTimeout(() => {
+            const resp = new Monster();
+            Object.assign(resp, {
+              id: m.id,
+              name: m.name,
+              class: m.class,
+              level: m.level,
+              x: m.spawnX,
+              y: m.spawnY,
+              spawnX: m.spawnX,
+              spawnY: m.spawnY,
+              currentHP: m.maxHP,
+              maxHP: m.maxHP,
+              attack: m.attack,
+              defense: m.defense,
+              speed: m.speed,
+              critDamage: m.critDamage,
+              mapID: m.mapID,
+              // ✅ copy sprites
+              idleLeft: m.idleLeft,
+              idleRight: m.idleRight,
+              idleUp: m.idleUp,
+              idleDown: m.idleDown,
+              walkLeft: m.walkLeft,
+              walkRight: m.walkRight,
+              walkUp: m.walkUp,
+              walkDown: m.walkDown,
+              attackLeft: m.attackLeft,
+              attackRight: m.attackRight,
+              attackUp: m.attackUp,
+              attackDown: m.attackDown,
+            });
+
+            // ✅ reattach AI data
+            resp.aggroRadius = m.aggroRadius || 200;
+            resp.attackRange = m.attackRange || 40;
+            resp.leaveRadius = m.leaveRadius || 300;
+            resp.attackCooldown = m.attackCooldown || 1000;
+            resp._lastAttack = 0;
+            resp.targetId = null;
+
+            this.state.monsters.set(resp.id, resp);
+
+            // ✅ notify clients of respawn
+            this.broadcast("monster_spawn", {
+              id: resp.id,
+              x: resp.x,
+              y: resp.y,
+              mapID: resp.mapID,
+              direction: "down",
+            });
+          }, 8000);
+        }
+      } // distance valid
+    } // monster exists
+  }
+
+  // ✅ Broadcast the player attack for client animation
+  this.broadcast("attack_event", {
+    attackerId: client.sessionId,
+    direction: data.direction || "right",
+    skillName: data.skillName || "Basic Attack",
+    damage: data.damage || 0,
+    crit: data.crit || false,
+    mapID: player.mapID,
+  });
+});
+
 
   // ============================================================
   // 👋 PLAYER JOIN
