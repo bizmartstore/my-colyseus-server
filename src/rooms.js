@@ -414,6 +414,7 @@ startMonsterAI() {
 
 
 // =========================== 🧠 Monster Battle AI ===========================
+// Replace your startMonsterBattleAI() with this improved version
 startMonsterBattleAI() {
   const AGGRO_RANGE = 150;
   const DISENGAGE_RANGE = 300;
@@ -423,11 +424,13 @@ startMonsterBattleAI() {
     this.state.monsters.forEach((m) => {
       if (m.currentHP <= 0) return; // Skip dead monsters
 
-      // Find nearest player
+      // Find nearest player — capture sessionId too
       let nearestPlayer = null;
+      let nearestPlayerId = null;      // <-- store sessionId (map key)
       let nearestDist = Infinity;
 
-      this.state.players.forEach((p) => {
+      // forEach provides (player, sessionId) if you use two args
+      this.state.players.forEach((p, sessionId) => {
         if (p.mapID !== m.mapID) return; // skip different map
         const dx = p.x - m.x;
         const dy = p.y - m.y;
@@ -435,19 +438,25 @@ startMonsterBattleAI() {
         if (dist < nearestDist) {
           nearestDist = dist;
           nearestPlayer = p;
+          nearestPlayerId = sessionId;  // <-- remember the session id
         }
       });
 
-      if (!nearestPlayer) return;
+      if (!nearestPlayer || !nearestPlayerId) {
+        // no players in this map
+        // optional: reset behavior
+        continue;
+      }
 
-      // 🧭 Check aggression distance
       if (nearestDist < AGGRO_RANGE) {
         // Move toward nearest player
         const dx = nearestPlayer.x - m.x;
         const dy = nearestPlayer.y - m.y;
         const len = Math.sqrt(dx * dx + dy * dy) || 1;
-        m.x += (dx / len) * m.speed * 0.6;
-        m.y += (dy / len) * m.speed * 0.6;
+
+        // tune movement speed per tick; multiplying by delta-like factor helps
+        m.x += (dx / len) * m.speed * 0.9; // slightly faster than before
+        m.y += (dy / len) * m.speed * 0.9;
 
         // Update facing direction
         m.direction =
@@ -456,7 +465,7 @@ startMonsterBattleAI() {
             : (dy < 0 ? "up" : "down");
         m.moving = true;
 
-        // 🗡️ Attack when close (fixed logic with parentheses)
+        // Attack when close
         if (
           nearestDist < 40 &&
           (!m._lastAttackTime || Date.now() - m._lastAttackTime > ATTACK_INTERVAL)
@@ -468,27 +477,28 @@ startMonsterBattleAI() {
           const rawDmg = Math.max(1, m.attack - nearestPlayer.defense);
           nearestPlayer.currentHP = Math.max(0, nearestPlayer.currentHP - rawDmg);
 
-          // Broadcast attack event
+          // Broadcast attack event — include both sessionId (id) and email
           this.broadcast("monster_attack", {
             monsterId: m.id,
-            targetId: nearestPlayer.email,
+            targetSessionId: nearestPlayerId,    // reliable identifier for server<>client session
+            targetId: nearestPlayer.email || "", // optional friendly identifier (email)
             damage: rawDmg,
             playerHP: nearestPlayer.currentHP,
           });
 
-          // Sync updated player HP
+          // Sync updated player HP using session id so clients can match
           this.broadcast("player_stats_update", {
-            id: nearestPlayer.sessionId,
+            id: nearestPlayerId,
+            email: nearestPlayer.email || "",
             currentHP: nearestPlayer.currentHP,
             maxHP: nearestPlayer.maxHP,
           });
 
           // Stop attack animation after short delay
-          setTimeout(() => (m.attacking = false), 400);
+          setTimeout(() => { m.attacking = false; }, 400);
         }
-      } 
-      // 😴 Out of range → return to spawn point
-      else if (nearestDist > DISENGAGE_RANGE) {
+      } else if (nearestDist > DISENGAGE_RANGE) {
+        // return to spawn point
         if (m.spawnX && m.spawnY) {
           const dx = m.spawnX - m.x;
           const dy = m.spawnY - m.y;
@@ -504,7 +514,7 @@ startMonsterBattleAI() {
         }
       }
 
-      // 🔁 Sync monster state to clients
+      // Sync monster state to clients
       this.broadcast("monster_update", {
         id: m.id,
         x: m.x,
