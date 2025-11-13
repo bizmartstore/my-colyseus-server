@@ -240,6 +240,9 @@ class MMORPGRoom extends Room {
     // ============================================================
 // ⚔️ PLAYER ATTACK MONSTER HANDLER (Realtime HP + Respawn)
 // ============================================================
+// ============================================================
+// ⚔️ PLAYER ATTACK MONSTER HANDLER (Ragnarok-style Damage + Respawn)
+// ============================================================
 this.onMessage("attack_monster", (client, data) => {
   const player = this.state.players.get(client.sessionId);
   if (!player) return;
@@ -247,27 +250,74 @@ this.onMessage("attack_monster", (client, data) => {
   const monster = this.state.monsters.get(data.monsterId);
   if (!monster) return;
 
-  // Compute damage
-  const damage = Math.max(1, player.attack - monster.defense);
-  monster.currentHP -= damage;
+  // ===========================================
+  // ✅ Determine base damage and range check
+  // ===========================================
+  const dx = player.x - monster.x;
+  const dy = player.y - monster.y;
+  const dist = Math.sqrt(dx * dx + dy * dy);
+  const meleeRange = 48;
 
-  // Broadcast HP update to all clients
+  if (dist > meleeRange) return; // too far, ignore attack
+
+  // ===========================================
+  // ⚔️ Compute Damage (Ragnarok-inspired)
+  // ===========================================
+  const attackPower = player.attack;       // e.g. 51
+  const defense = monster.defense;         // e.g. 13
+  const levelBonus = player.level * 2;     // scale by level
+  const base = attackPower + levelBonus;
+
+  // ±10% variance
+  const variance = base * (Math.random() * 0.2 - 0.1);
+
+  // soft defense formula
+  const defReduce = defense * 0.5;
+
+  // final damage
+  let damage = Math.max(1, Math.floor(base - defReduce + variance));
+
+  // ===========================================
+  // 💥 Critical hit (20% chance)
+  // ===========================================
+  const isCrit = Math.random() < 0.2;
+  if (isCrit) {
+    damage = Math.floor(damage * (player.critDamage / 100));
+  }
+
+  // ===========================================
+  // 💢 Optional Skill Damage Multiplier
+  // ===========================================
+  if (player.Skill1_Damage && !data.basicAttack) {
+    damage = Math.floor(damage + Number(player.Skill1_Damage));
+  }
+
+  // ===========================================
+  // 🩸 Apply damage to monster
+  // ===========================================
+  monster.currentHP -= damage;
+  if (monster.currentHP < 0) monster.currentHP = 0;
+
+  // Broadcast HP + floating number
   this.broadcast("monster_hp_update", {
     monsterId: monster.id,
     currentHP: monster.currentHP,
     maxHP: monster.maxHP,
+    damage,
+    crit: isCrit,
   });
 
-  // 🩸 Monster death & respawn after 10s
+  // ===========================================
+  // 💀 Handle monster death & respawn
+  // ===========================================
   if (monster.currentHP <= 0) {
     console.log(`💀 Monster ${monster.name} killed by ${player.name}`);
-    this.broadcast("monster_killed", { monsterId: monster.id });
 
-    // Remove from map temporarily
-    monster.currentHP = 0;
+    this.broadcast("monster_killed", { monsterId: monster.id });
     monster.visible = false;
     this.broadcast("monster_visibility", { monsterId: monster.id, visible: false });
 
+    // Respawn after 10 seconds
     setTimeout(() => {
       monster.currentHP = monster.maxHP;
       monster.visible = true;
@@ -280,7 +330,7 @@ this.onMessage("attack_monster", (client, data) => {
         currentHP: monster.currentHP,
         maxHP: monster.maxHP,
       });
-    }, 10000); // 10 seconds
+    }, 10000);
   }
 });
 
