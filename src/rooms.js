@@ -115,6 +115,10 @@ class Monster extends Schema {
     this.speed = 5;
     this.critDamage = 100;
     this.mapID = 1;
+    this.visible = true;
+    this.spawnX = 0;
+    this.spawnY = 0;
+
 
     // ✅ Monster Sprite URLs
     this.idleLeft = "";
@@ -161,6 +165,10 @@ defineTypes(Monster, {
   attackRight: "string",
   attackUp: "string",
   attackDown: "string",
+  visible: "boolean",
+  spawnX: "number",
+  spawnY: "number",
+
 });
 
 // ============================================================
@@ -228,6 +236,54 @@ class MMORPGRoom extends Room {
         mapID: player.mapID,
       });
     });
+
+    // ============================================================
+// ⚔️ PLAYER ATTACK MONSTER HANDLER (Realtime HP + Respawn)
+// ============================================================
+this.onMessage("attack_monster", (client, data) => {
+  const player = this.state.players.get(client.sessionId);
+  if (!player) return;
+
+  const monster = this.state.monsters.get(data.monsterId);
+  if (!monster) return;
+
+  // Compute damage
+  const damage = Math.max(1, player.attack - monster.defense);
+  monster.currentHP -= damage;
+
+  // Broadcast HP update to all clients
+  this.broadcast("monster_hp_update", {
+    monsterId: monster.id,
+    currentHP: monster.currentHP,
+    maxHP: monster.maxHP,
+  });
+
+  // 🩸 Monster death & respawn after 10s
+  if (monster.currentHP <= 0) {
+    console.log(`💀 Monster ${monster.name} killed by ${player.name}`);
+    this.broadcast("monster_killed", { monsterId: monster.id });
+
+    // Remove from map temporarily
+    monster.currentHP = 0;
+    monster.visible = false;
+    this.broadcast("monster_visibility", { monsterId: monster.id, visible: false });
+
+    setTimeout(() => {
+      monster.currentHP = monster.maxHP;
+      monster.visible = true;
+      monster.x = monster.spawnX || monster.x;
+      monster.y = monster.spawnY || monster.y;
+      this.broadcast("monster_respawn", {
+        monsterId: monster.id,
+        x: monster.x,
+        y: monster.y,
+        currentHP: monster.currentHP,
+        maxHP: monster.maxHP,
+      });
+    }, 10000); // 10 seconds
+  }
+});
+
 
     // ============================================================
     // 🧟 MONSTER UPDATE HANDLER (for AI or admin control)
