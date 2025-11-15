@@ -451,9 +451,9 @@ this.onMessage("update_stats", (client, data) => {
 });
 
     // ============================================================
-// 🔁 PLAYER RESPAWN REQUEST (client → server)
+// 🔁 PLAYER RESPAWN REQUEST (client → server) — FIXED
 // ============================================================
-this.onMessage("player_request_respawn", (client) => {
+this.onMessage("player_request_respawn", async (client) => {
     const p = this.state.players.get(client.sessionId);
     if (!p) return;
 
@@ -470,7 +470,6 @@ this.onMessage("player_request_respawn", (client) => {
             mon._aggroMap.delete(client.sessionId);
         }
 
-        // If monster has no more aggro targets, calm down
         if (mon._aggroMap && mon._aggroMap.size === 0) {
             mon.isAggro = false;
             mon.targetPlayer = "";
@@ -478,13 +477,13 @@ this.onMessage("player_request_respawn", (client) => {
     });
 
     // --------------------------------------------------------
-    // ❤️ Restore player HP
+    // ❤️ Restore HP Fully
     // --------------------------------------------------------
     p.dead = false;
     p.currentHP = p.maxHP;
 
     // --------------------------------------------------------
-    // 📍 Respawn to portal coordinates
+    // 📍 Respawn at Portal Position
     // --------------------------------------------------------
     const PORTAL_X = 300;
     const PORTAL_Y = 200;
@@ -497,7 +496,7 @@ this.onMessage("player_request_respawn", (client) => {
     p.direction = "down";
 
     // --------------------------------------------------------
-    // 📩 Send respawn ONLY to the client
+    // 📩 Send respawn to client
     // --------------------------------------------------------
     client.send("player_respawn", {
         x: PORTAL_X,
@@ -507,7 +506,7 @@ this.onMessage("player_request_respawn", (client) => {
     });
 
     // --------------------------------------------------------
-    // 🌍 Update other players
+    // 🌍 Notify other players
     // --------------------------------------------------------
     this.broadcast("player_move", {
         id: client.sessionId,
@@ -518,7 +517,27 @@ this.onMessage("player_request_respawn", (client) => {
         direction: "down",
         mapID: p.mapID
     }, { except: client });
+
+    // --------------------------------------------------------
+    // ⭐ SEND FULL HP BACK TO GOOGLE SHEETS ⭐
+    // --------------------------------------------------------
+    try {
+        await fetch("https://script.google.com/macros/s/AKfycbz14_p6dz4Y1_MpU6C3T-nIF9ebhEI7u_dlR6d8dxRSUqqRIKnC-PtHr_4qwWvv_LWLbg/exec", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                endpoint: "saveRespawnHP",
+                email: p.email,
+                hp: p.currentHP
+            })
+        });
+
+        console.log(`📡 Sheets Updated: ${p.email} = ${p.currentHP}`);
+    } catch (err) {
+        console.error("❌ Failed to update Sheets HP:", err);
+    }
 });
+
 
 
 
