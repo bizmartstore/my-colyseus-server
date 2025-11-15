@@ -304,9 +304,20 @@ if (!monster._aggroMap) monster._aggroMap = new Map();
 let currentAggro = monster._aggroMap.get(client.sessionId) || 0;
 monster._aggroMap.set(client.sessionId, currentAggro + damage + 50);
 
-// Force monster to enter AGGRO state
+// ===========================================
+// 🧠 FORCE MONSTER TO CHASE PLAYER WHO HIT IT
+// ===========================================
 monster.isAggro = true;
 monster.targetPlayer = client.sessionId;
+
+// Add strong aggro weight
+if (!monster._aggroMap) monster._aggroMap = new Map();
+const prev = monster._aggroMap.get(client.sessionId) || 0;
+monster._aggroMap.set(client.sessionId, prev + damage + 100);
+
+// Wake up AI immediately
+monster._forcedAggroTick = Date.now();
+
 
 // ===========================================
 // 📢 Broadcast HP + floating damage
