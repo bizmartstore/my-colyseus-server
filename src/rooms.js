@@ -411,6 +411,53 @@ this.broadcast("monster_hp_update", {
     });
 
     // ============================================================
+    // 🔁 PLAYER RESPAWN REQUEST (client → server)
+    // ============================================================
+    this.onMessage("player_request_respawn", (client) => {
+      const p = this.state.players.get(client.sessionId);
+      if (!p) return;
+
+      // Reset HP to full
+      p.currentHP = Number(p.maxHP || 100);
+
+      // --- Choose respawn coordinates ---
+      // Option A: use player's initial spawn saved in schema (if you store it)
+      // p.x = Number(p.spawnX ?? p.x ?? 300);
+      // p.y = Number(p.spawnY ?? p.y ?? 200);
+
+      // Option B (simple): set to default room spawn (change to your preferred coords)
+      const DEFAULT_SPAWN_X = 300;
+      const DEFAULT_SPAWN_Y = 200;
+      p.x = DEFAULT_SPAWN_X;
+      p.y = DEFAULT_SPAWN_Y;
+
+      // Ensure movement flags are reset
+      p.moving = false;
+      p.attacking = false;
+      p.direction = "down";
+
+      // Send respawn info only to the requesting client
+      client.send("player_respawn", {
+        x: Math.floor(p.x),
+        y: Math.floor(p.y),
+        hp: p.currentHP,
+        maxHP: p.maxHP
+      });
+
+      // Notify other clients about the player's new position (so they see the respawn)
+      this.broadcast("player_move", {
+        id: client.sessionId,
+        x: Math.floor(p.x),
+        y: Math.floor(p.y),
+        direction: p.direction,
+        moving: false,
+        attacking: false,
+        mapID: p.mapID
+      }, { except: client });
+    });
+
+
+    // ============================================================
     // 🧩 INIT: Spawn Monsters on Room Start
     // ============================================================
     this.spawnDefaultMonsters();
