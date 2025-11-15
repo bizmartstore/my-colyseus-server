@@ -439,43 +439,77 @@ this.onMessage("attack_monster", (client, data) => {
   }
 
 // ============================================================
-// 🧠 SIMPLE MONSTER AI — random wandering within small radius
+// 🧠 MONSTER AI — Random Wander + Aggro Follow + Attack
 // ============================================================
 startMonsterAI() {
-  const moveMonster = (m) => {
-    if (!m) return;
+  const TICK_MS = 120;            // AI tick (chase/attack)
+  const WANDER_STEP_MS = 150;     // used by wander movement steps (keeps original feel)
+  const CHASE_SPEED = 2.4;        // chase speed in pixels per tick
+  const WANDER_SPEED = 1.2;       // strolling speed
+  const ATTACK_RANGE = 40;        // melee range
+  const CHASE_LEASH = 300;        // distance to drop aggro
+  const ATTACK_COOLDOWN_MS = 1000; // 1s between monster attacks
+  const REGEN_AMOUNT = 5;         // HP per regen tick
+  const REGEN_INTERVAL_MS = 1000; // regen tick while de-aggro
+  const KNOCKBACK_DISTANCE = 28;  // pixels to push player on hit
+  const SMOOTH_BROADCAST = 150;   // how often to broadcast position updates for smoother motion
 
-    // define wandering area around spawn
-    const radius = 80; // max distance from original position
+  // helper to ensure non-schema runtime fields exist on monsters
+  const ensureRuntimeFields = (m) => {
+    if (!m) {
+      return;
+    }
+    // per-monster aggro map: Map<sessionId, weight>
+    if (!m._aggroMap) m._aggroMap = new Map();
+    if (!m._wandering) m._wandering = false;
+    if (!m._wanderTimer) m._wanderTimer = null;
+    if (!m._lastBroadcast) m._lastBroadcast = 0;
+    if (!m._regenTimer) m._regenTimer = null;
+    if (!m.attackCooldown) m.attackCooldown = 0; // schema field already exists? keep safe
+  };
+
+  // --- Wander implementation reworked to allow interruption by aggro
+  const wander = (m) => {
+    if (!m || m.isAggro || !m.visible || m.currentHP <= 0) return;
+    ensureRuntimeFields(m);
+
+    // mark wandering state
+    m._wandering = true;
     if (!m.spawnX) m.spawnX = m.x;
     if (!m.spawnY) m.spawnY = m.y;
 
-    // choose random small offset
+    const radius = 80;
     const newX = m.spawnX + (Math.random() * 2 - 1) * radius;
     const newY = m.spawnY + (Math.random() * 2 - 1) * radius;
 
-    // choose direction based on movement
     let dx = newX - m.x;
     let dy = newY - m.y;
     const absX = Math.abs(dx);
     const absY = Math.abs(dy);
-    if (absX > absY) {
-      m.direction = dx < 0 ? "left" : "right";
-    } else {
-      m.direction = dy < 0 ? "up" : "down";
-    }
-
+    m.direction = absX > absY ? (dx < 0 ? "left" : "right") : (dy < 0 ? "up" : "down");
     m.moving = true;
 
-    // move gradually (simulate walking)
     const steps = 20;
     let step = 0;
-    const stepInterval = setInterval(() => {
-      step++;
-      m.x += dx / steps;
-      m.y += dy / steps;
 
-      // sync to all players
+    const stepInterval = setInterval(() => {
+      // if aggro triggers, stop this wander
+      if (!m || m.isAggro || m.currentHP <= 0) {
+        clearInterval(stepInterval);
+        m.moving = false;
+        m._wandering = false;
+        return;
+      }
+
+      step++;
+      m.x += (dx / steps) * (WANDER_SPEED / 1.2);
+      m.y += (dy / steps) * (WANDER_SPEED / 1.2);
+
+      // direction update
+      if (Math.abs(dx) > Math.abs(dy)) m.direction = dx < 0 ? "left" : "right";
+      else m.direction = dy < 0 ? "up" : "down";
+
+      // broadcast incremental position for smoother display
       this.broadcast("monster_update", {
         id: m.id,
         x: m.x,
@@ -487,23 +521,249 @@ startMonsterAI() {
       if (step >= steps) {
         clearInterval(stepInterval);
         m.moving = false;
-        this.broadcast("monster_update", {
-          id: m.id,
-          moving: false,
-        });
-
-        // wait random delay, then move again
-        setTimeout(() => moveMonster(m), 1500 + Math.random() * 3000);
+        m._wandering = false;
+        this.broadcast("monster_update", { id: m.id, moving: false });
+        // schedule next wander
+        clearTimeout(m._wanderTimer);
+        m._wanderTimer = setTimeout(() => wander(m), 1000 + Math.random() * 2500);
       }
-    }, 150);
+    }, WANDER_STEP_MS);
   };
 
-  // loop through all monsters and start wandering
+  // --- Pick top aggro target (highest weight) or fallback to single target field
+  const pickTopAggro = (m) => {
+    ensureRuntimeFields(m);
+    // if _aggroMap has entries, pick highest weight
+    let top = null;
+    let topWeight = 0;
+    for (const [sid, w] of m._aggroMap.entries()) {
+      if (w > topWeight) { topWeight = w; top = sid; }
+    }
+    if (top) return top;
+    // fallback to legacy single target (attack_monster may set this)
+    if (m.targetPlayer) return m.targetPlayer;
+    return null;
+  };
+
+  // --- Reduce aggro weights over time (fades)
+  const decayAggro = (m) => {
+    ensureRuntimeFields(m);
+    if (!m._aggroMap) return;
+    for (const [sid, w] of Array.from(m._aggroMap.entries())) {
+      const newW = Math.max(0, w - 1); // simple linear decay
+      if (newW <= 0) m._aggroMap.delete(sid);
+      else m._aggroMap.set(sid, newW);
+    }
+    // if empty, ensure isAggro false
+    if (m._aggroMap.size === 0 && !m.targetPlayer) {
+      m.isAggro = false;
+    }
+  };
+
+  // --- Start regen for monster when de-aggrored
+  const tryStartRegen = (m) => {
+    ensureRuntimeFields(m);
+    if (m._regenTimer) return; // already running
+    m._regenTimer = setInterval(() => {
+      if (!m) return clearInterval(m._regenTimer);
+      // stop regen if aggro or dead
+      if (m.isAggro || m.currentHP <= 0) {
+        clearInterval(m._regenTimer);
+        m._regenTimer = null;
+        return;
+      }
+      // regen a bit
+      m.currentHP = Math.min(m.maxHP, (m.currentHP || 0) + REGEN_AMOUNT);
+      this.broadcast("monster_regen", { monsterId: m.id, currentHP: m.currentHP, maxHP: m.maxHP });
+      // fire an update occasionally to UI players
+      if (m.hpFill) {
+        // (client side handles hp bar update on this message if desired)
+      }
+      // if full HP, stop regen
+      if (m.currentHP >= m.maxHP) {
+        clearInterval(m._regenTimer);
+        m._regenTimer = null;
+      }
+    }, REGEN_INTERVAL_MS);
+  };
+
+  // --- Apply knockback to a player (server authoritative)
+  const applyKnockbackToPlayer = (player, fromX, fromY) => {
+    if (!player) return;
+    // vector from monster to player, push player away
+    const dx = player.x - fromX;
+    const dy = player.y - fromY;
+    const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+    const nx = dx / dist;
+    const ny = dy / dist;
+    player.x += nx * KNOCKBACK_DISTANCE;
+    player.y += ny * KNOCKBACK_DISTANCE;
+    // clamp within reasonable bounds if you have map bounds (optional)
+    // broadcast player knockback (clients can play effect & lerp)
+    this.broadcast("player_knockback", {
+      playerId: Object.keys(this.state.players).find(k => this.state.players.get(k) === player) || null,
+      x: Math.floor(player.x),
+      y: Math.floor(player.y),
+    });
+    // also broadcast a player_move update so other clients see new position (excepted client will get authoritative update)
+    this.broadcast("player_move", {
+      id: Object.keys(this.state.players).find(k => this.state.players.get(k) === player) || null,
+      x: Math.floor(player.x),
+      y: Math.floor(player.y),
+      direction: player.direction,
+      moving: true,
+      attacking: false,
+      mapID: player.mapID
+    });
+  };
+
+  // --- Main chase/attack tick (runs every TICK_MS)
+  setInterval(() => {
+    const now = Date.now();
+
+    // iterate a copy to avoid mutation issues
+    this.state.monsters.forEach((m) => {
+      try {
+        ensureRuntimeFields(m);
+        if (!m.visible || m.currentHP <= 0) {
+          // clear runtime timers if dead
+          if (m._regenTimer) {
+            clearInterval(m._regenTimer);
+            m._regenTimer = null;
+          }
+          return;
+        }
+
+        // decay aggro gradually
+        decayAggro(m);
+
+        // decide top target
+        const topTargetId = pickTopAggro(m);
+        if (topTargetId) {
+          m.isAggro = true;
+          m.targetPlayer = topTargetId;
+        } else {
+          // no targets: ensure flagged as not aggro
+          if (m.isAggro) {
+            m.isAggro = false;
+            m.targetPlayer = "";
+            tryStartRegen(m); // start regen when de-aggro
+            // inform clients about aggro change
+            this.broadcast("monster_aggro_update", { monsterId: m.id, isAggro: false });
+          }
+        }
+
+        // If not aggro, skip chase logic
+        if (!m.isAggro) continue;
+
+        // get current target player
+        const targetSid = pickTopAggro(m);
+        const player = this.state.players.get(targetSid);
+        if (!player) {
+          // drop invalid target
+          m._aggroMap.delete(targetSid);
+          m.isAggro = m._aggroMap.size > 0;
+          if (!m.isAggro) {
+            m.targetPlayer = "";
+            tryStartRegen(m);
+          }
+          continue;
+        }
+
+        // compute vector to player
+        const dx = player.x - m.x;
+        const dy = player.y - m.y;
+        const dist = Math.sqrt(dx * dx + dy * dy) || 0.001;
+
+        // if player too far, drop them from aggro map (leash)
+        if (dist > CHASE_LEASH) {
+          m._aggroMap.delete(targetSid);
+          if (m._aggroMap.size === 0) {
+            m.isAggro = false;
+            m.targetPlayer = "";
+            tryStartRegen(m);
+            this.broadcast("monster_aggro_update", { monsterId: m.id, isAggro: false });
+          }
+          continue;
+        }
+
+        // Move towards player if not in attack range
+        if (dist > ATTACK_RANGE) {
+          // move a step towards player
+          const step = CHASE_SPEED * (TICK_MS / 1000) * 60 / 60; // normalized
+          m.x += (dx / dist) * CHASE_SPEED;
+          m.y += (dy / dist) * CHASE_SPEED;
+
+          // direction based on vector
+          m.direction = Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? "right" : "left") : (dy > 0 ? "down" : "up");
+          m.moving = true;
+
+          // broadcast smooth updates at SMOOTH_BROADCAST intervals (avoid flooding)
+          if (!m._lastBroadcast || (now - m._lastBroadcast) > SMOOTH_BROADCAST) {
+            m._lastBroadcast = now;
+            this.broadcast("monster_update", {
+              id: m.id, x: Math.floor(m.x), y: Math.floor(m.y),
+              direction: m.direction, moving: true
+            });
+          }
+        } else {
+          // within attack range: stop and attack respecting cooldown
+          m.moving = false;
+
+          if (!m.attackCooldown || m.attackCooldown <= now) {
+            m.attackCooldown = now + ATTACK_COOLDOWN_MS;
+
+            // mark attacking and broadcast animation trigger
+            m.attacking = true;
+            this.broadcast("monster_play_attack", { monsterId: m.id, direction: m.direction });
+
+            // compute damage formula (simple)
+            const damage = Math.max(1, Math.floor(m.attack - player.defense / 1.5));
+
+            // apply damage to player
+            player.currentHP = Math.max(0, (player.currentHP || player.currentHp || player.hp || 0) - damage);
+
+            // apply small knockback
+            applyKnockbackToPlayer(player, m.x, m.y);
+
+            // broadcast the damage event (client already has listener for monster_attack previously, but this is specific)
+            this.broadcast("monster_attack_player", {
+              monsterId: m.id,
+              playerId: targetSid,
+              damage,
+              direction: m.direction,
+              playerHP: player.currentHP,
+              playerMaxHP: player.maxHP
+            });
+
+            // if player died: remove from aggro map and optionally award XP (not changed here)
+            if (player.currentHP <= 0) {
+              m._aggroMap.delete(targetSid);
+              if (m._aggroMap.size === 0) {
+                m.isAggro = false;
+                m.targetPlayer = "";
+                tryStartRegen(m);
+                this.broadcast("monster_aggro_update", { monsterId: m.id, isAggro: false });
+              }
+            }
+
+            // short attack animation end toggle
+            setTimeout(() => { try { m.attacking = false; } catch (e) {} }, 350);
+          }
+        }
+
+      } catch (err) {
+        console.error("Monster AI error for monster", m?.id, err);
+      }
+    });
+  }, TICK_MS);
+
+  // --- start wandering behavior for all monsters (preserve original timing) ---
   this.state.monsters.forEach((m) => {
-    setTimeout(() => moveMonster(m), 1000 + Math.random() * 2000);
+    ensureRuntimeFields(m);
+    setTimeout(() => wander(m), 1000 + Math.random() * 2000);
   });
 }
-
   // ============================================================
   // 👋 PLAYER JOIN
   // ============================================================
