@@ -888,72 +888,85 @@ if (now >= m.attackCooldown) {
 }
 
   // ============================================================
-// 👋 PLAYER JOIN
+// 👋 PLAYER JOIN (FULLY FIXED – NO MORE 100/100 HP BUG)
 // ============================================================
 onJoin(client, options) {
   const p = options.player || {};
   console.log(`👋 ${p.Email || "Unknown"} joined MMORPG room.`);
 
+  // ------------------------------------------------------------
+  // 🛠️ Helper: Validate numeric stats (reject "", null, undefined)
+  // ------------------------------------------------------------
+  function validStat(v) {
+    return v !== undefined && v !== null && v !== "" && !isNaN(Number(v));
+  }
+
   const newPlayer = new Player();
 
-  // Basic info
+  // ------------------------------------------------------------
+  // 📌 Basic identity
+  // ------------------------------------------------------------
   newPlayer.email = p.Email || client.sessionId;
   newPlayer.name = p.PlayerName || "Guest";
   newPlayer.characterID = p.CharacterID || "C000";
   newPlayer.characterName = p.CharacterName || "Unknown";
   newPlayer.characterClass = p.CharacterClass || "Adventurer";
 
-  // Position
-  newPlayer.x = Number(p.PositionX) || 300;
-  newPlayer.y = Number(p.PositionY) || 200;
+  // ------------------------------------------------------------
+  // 📌 Position (safe loader)
+  // ------------------------------------------------------------
+  newPlayer.x = validStat(p.PositionX) ? Number(p.PositionX) : 300;
+  newPlayer.y = validStat(p.PositionY) ? Number(p.PositionY) : 200;
   newPlayer.animation = p.MovementAnimation || "IdleFront";
-  newPlayer.mapID = Number(p.MapID) || 1;
+  newPlayer.mapID = validStat(p.MapID) ? Number(p.MapID) : 1;
 
-  // ============================================================
-  // ✅ SAFE STAT LOADING (NO MORE HP RESET TO 100)
-  // ============================================================
-
-  // ---- Max HP ----
-  if (p.MaxHP !== undefined && p.MaxHP !== null && !isNaN(Number(p.MaxHP))) {
+  // ------------------------------------------------------------
+  // ❤️ FIXED HP LOADER (NO MORE RESET TO 100)
+  // ------------------------------------------------------------
+  // Max HP
+  if (validStat(p.MaxHP)) {
     newPlayer.maxHP = Number(p.MaxHP);
   } else {
-    newPlayer.maxHP = 100; // fallback
+    newPlayer.maxHP = 100;  // fallback default
   }
 
-  // ---- Current HP ----
-  // If Sheets/File didn't send CurrentHP → use full HP (maxHP)
-  if (p.CurrentHP !== undefined && p.CurrentHP !== null && !isNaN(Number(p.CurrentHP))) {
+  // Current HP
+  if (validStat(p.CurrentHP)) {
     newPlayer.currentHP = Number(p.CurrentHP);
   } else {
-    newPlayer.currentHP = newPlayer.maxHP;  // FULL HP (critical fix)
+    newPlayer.currentHP = newPlayer.maxHP; // full HP if not provided
   }
 
-  // ---- Mana ----
-  newPlayer.maxMana =
-    p.MaxMana !== undefined && p.MaxMana !== null ? Number(p.MaxMana) : 100;
+  // ------------------------------------------------------------
+  // 🔵 Mana (safe loader)
+  // ------------------------------------------------------------
+  newPlayer.maxMana = validStat(p.MaxMana) ? Number(p.MaxMana) : 100;
+  newPlayer.currentMana = validStat(p.CurrentMana)
+    ? Number(p.CurrentMana)
+    : newPlayer.maxMana;
 
-  newPlayer.currentMana =
-    p.CurrentMana !== undefined && p.CurrentMana !== null
-      ? Number(p.CurrentMana)
-      : newPlayer.maxMana;
+  // ------------------------------------------------------------
+  // 🟣 EXP (safe loader)
+  // ------------------------------------------------------------
+  newPlayer.maxEXP = validStat(p.MaxEXP) ? Number(p.MaxEXP) : 100;
+  newPlayer.currentEXP = validStat(p.CurrentEXP)
+    ? Number(p.CurrentEXP)
+    : 0;
 
-  // ---- EXP ----
-  newPlayer.maxEXP =
-    p.MaxEXP !== undefined && p.MaxEXP !== null ? Number(p.MaxEXP) : 100;
+  // ------------------------------------------------------------
+  // 🟡 Other stats
+  // ------------------------------------------------------------
+  newPlayer.attack = validStat(p.Attack) ? Number(p.Attack) : 10;
+  newPlayer.defense = validStat(p.Defense) ? Number(p.Defense) : 5;
+  newPlayer.speed = validStat(p.Speed) ? Number(p.Speed) : 8;
+  newPlayer.critDamage = validStat(p.CritDamage)
+    ? Number(p.CritDamage)
+    : 100;
+  newPlayer.level = validStat(p.Level) ? Number(p.Level) : 1;
 
-  newPlayer.currentEXP =
-    p.CurrentEXP !== undefined && p.CurrentEXP !== null
-      ? Number(p.CurrentEXP)
-      : 0;
-
-  // ---- Other Stats ----
-  newPlayer.attack = Number(p.Attack) || 10;
-  newPlayer.defense = Number(p.Defense) || 5;
-  newPlayer.speed = Number(p.Speed) || 8;
-  newPlayer.critDamage = Number(p.CritDamage) || 100;
-  newPlayer.level = Number(p.Level) || 1;
-
-  // Sprites
+  // ------------------------------------------------------------
+  // 🖼️ Sprites
+  // ------------------------------------------------------------
   newPlayer.idleFront = p.ImageURL_IdleFront || "";
   newPlayer.idleBack = p.ImageURL_IdleBack || "";
   newPlayer.idleLeft = p.ImageURL_IdleLeft || "";
@@ -967,17 +980,23 @@ onJoin(client, options) {
   newPlayer.attackUp = p.ImageURL_Attack_Up || "";
   newPlayer.attackDown = p.ImageURL_Attack_Down || "";
 
-  // Add to state
+  // ------------------------------------------------------------
+  // 🟩 Add player to game state
+  // ------------------------------------------------------------
   this.state.players.set(client.sessionId, newPlayer);
 
-  // Send welcome packet
+  // ------------------------------------------------------------
+  // 🎁 Send welcome packet
+  // ------------------------------------------------------------
   client.send("joined", {
     sessionId: client.sessionId,
     message: "✅ Welcome to MMORPG Room!",
     currentMap: newPlayer.mapID,
   });
 
-  // Announce to others
+  // ------------------------------------------------------------
+  // 📢 Notify other players
+  // ------------------------------------------------------------
   this.broadcast("player_joined", {
     id: client.sessionId,
     name: newPlayer.name,
@@ -1011,6 +1030,7 @@ onJoin(client, options) {
     level: newPlayer.level,
   });
 }
+
 
 
   // ============================================================
