@@ -388,31 +388,67 @@ this.broadcast("monster_hp_update", {
     });
 
     // ============================================================
-    // ❤️ HP/MP/EXP REAL-TIME SYNC
-    // ============================================================
-    this.onMessage("update_stats", (client, data) => {
-      const player = this.state.players.get(client.sessionId);
-      if (!player) return;
+// ❤️ HP/MP/EXP REAL-TIME SYNC (SAFE VERSION)
+// ============================================================
+this.onMessage("update_stats", (client, data) => {
+  const player = this.state.players.get(client.sessionId);
+  if (!player) return;
 
-      player.currentHP = Number(data.currentHP ?? player.currentHP);
-      player.maxHP = Number(data.maxHP ?? player.maxHP);
-      player.currentMana = Number(data.currentMana ?? player.currentMana);
-      player.maxMana = Number(data.maxMana ?? player.maxMana);
-      player.currentEXP = Number(data.currentEXP ?? player.currentEXP);
-      player.maxEXP = Number(data.maxEXP ?? player.maxEXP);
-      player.level = Number(data.level ?? player.level);
+  // --------------------------
+  // 🩸 Update HP ONLY if sent
+  // --------------------------
+  if (data.currentHP !== undefined && data.currentHP !== null && !isNaN(Number(data.currentHP))) {
+    player.currentHP = Number(data.currentHP);
+  }
 
-      this.broadcast("player_stats_update", {
-        id: client.sessionId,
-        currentHP: player.currentHP,
-        maxHP: player.maxHP,
-        currentMana: player.currentMana,
-        maxMana: player.maxMana,
-        currentEXP: player.currentEXP,
-        maxEXP: player.maxEXP,
-        level: player.level,
-      }, { except: client });
-    });
+  if (data.maxHP !== undefined && data.maxHP !== null && !isNaN(Number(data.maxHP))) {
+    player.maxHP = Number(data.maxHP);
+  }
+
+  // --------------------------
+  // 🔵 Update Mana ONLY if sent
+  // --------------------------
+  if (data.currentMana !== undefined && data.currentMana !== null && !isNaN(Number(data.currentMana))) {
+    player.currentMana = Number(data.currentMana);
+  }
+
+  if (data.maxMana !== undefined && data.maxMana !== null && !isNaN(Number(data.maxMana))) {
+    player.maxMana = Number(data.maxMana);
+  }
+
+  // --------------------------
+  // 🟣 Update EXP ONLY if sent
+  // --------------------------
+  if (data.currentEXP !== undefined && data.currentEXP !== null && !isNaN(Number(data.currentEXP))) {
+    player.currentEXP = Number(data.currentEXP);
+  }
+
+  if (data.maxEXP !== undefined && data.maxEXP !== null && !isNaN(Number(data.maxEXP))) {
+    player.maxEXP = Number(data.maxEXP);
+  }
+
+  // --------------------------
+  // 🟡 Update level ONLY if sent
+  // --------------------------
+  if (data.level !== undefined && data.level !== null && !isNaN(Number(data.level))) {
+    player.level = Number(data.level);
+  }
+
+  // --------------------------
+  // 📡 Broadcast updated stats
+  // (only forwards sanitized values)
+  // --------------------------
+  this.broadcast("player_stats_update", {
+    id: client.sessionId,
+    currentHP: player.currentHP,
+    maxHP: player.maxHP,
+    currentMana: player.currentMana,
+    maxMana: player.maxMana,
+    currentEXP: player.currentEXP,
+    maxEXP: player.maxEXP,
+    level: player.level,
+  }, { except: client });
+});
 
     // ============================================================
 // 🔁 PLAYER RESPAWN REQUEST (client → server)
@@ -852,97 +888,130 @@ if (now >= m.attackCooldown) {
 }
 
   // ============================================================
-  // 👋 PLAYER JOIN
+// 👋 PLAYER JOIN
+// ============================================================
+onJoin(client, options) {
+  const p = options.player || {};
+  console.log(`👋 ${p.Email || "Unknown"} joined MMORPG room.`);
+
+  const newPlayer = new Player();
+
+  // Basic info
+  newPlayer.email = p.Email || client.sessionId;
+  newPlayer.name = p.PlayerName || "Guest";
+  newPlayer.characterID = p.CharacterID || "C000";
+  newPlayer.characterName = p.CharacterName || "Unknown";
+  newPlayer.characterClass = p.CharacterClass || "Adventurer";
+
+  // Position
+  newPlayer.x = Number(p.PositionX) || 300;
+  newPlayer.y = Number(p.PositionY) || 200;
+  newPlayer.animation = p.MovementAnimation || "IdleFront";
+  newPlayer.mapID = Number(p.MapID) || 1;
+
   // ============================================================
-  onJoin(client, options) {
-    const p = options.player || {};
-    console.log(`👋 ${p.Email || "Unknown"} joined MMORPG room.`);
+  // ✅ SAFE STAT LOADING (NO MORE HP RESET TO 100)
+  // ============================================================
 
-    const newPlayer = new Player();
-
-    // Basic info
-    newPlayer.email = p.Email || client.sessionId;
-    newPlayer.name = p.PlayerName || "Guest";
-    newPlayer.characterID = p.CharacterID || "C000";
-    newPlayer.characterName = p.CharacterName || "Unknown";
-    newPlayer.characterClass = p.CharacterClass || "Adventurer";
-
-    // Position
-    newPlayer.x = Number(p.PositionX) || 300;
-    newPlayer.y = Number(p.PositionY) || 200;
-    newPlayer.animation = p.MovementAnimation || "IdleFront";
-    newPlayer.mapID = Number(p.MapID) || 1;
-
-    // Stats
-    newPlayer.currentHP = Number(p.CurrentHP) || 100;
-    newPlayer.maxHP = Number(p.MaxHP) || 100;
-    newPlayer.currentMana = Number(p.CurrentMana) || 100;
-    newPlayer.maxMana = Number(p.MaxMana) || 100;
-    newPlayer.currentEXP = Number(p.CurrentEXP) || 0;
-    newPlayer.maxEXP = Number(p.MaxEXP) || 100;
-    newPlayer.attack = Number(p.Attack) || 10;
-    newPlayer.defense = Number(p.Defense) || 5;
-    newPlayer.speed = Number(p.Speed) || 8;
-    newPlayer.critDamage = Number(p.CritDamage) || 100;
-    newPlayer.level = Number(p.Level) || 1;
-
-    // Sprites
-    newPlayer.idleFront = p.ImageURL_IdleFront || "";
-    newPlayer.idleBack = p.ImageURL_IdleBack || "";
-    newPlayer.idleLeft = p.ImageURL_IdleLeft || "";
-    newPlayer.idleRight = p.ImageURL_IdleRight || "";
-    newPlayer.walkLeft = p.ImageURL_Walk_Left || "";
-    newPlayer.walkRight = p.ImageURL_Walk_Right || "";
-    newPlayer.walkUp = p.ImageURL_Walk_Up || "";
-    newPlayer.walkDown = p.ImageURL_Walk_Down || "";
-    newPlayer.attackLeft = p.ImageURL_Attack_Left || "";
-    newPlayer.attackRight = p.ImageURL_Attack_Right || "";
-    newPlayer.attackUp = p.ImageURL_Attack_Up || "";
-    newPlayer.attackDown = p.ImageURL_Attack_Down || "";
-
-    this.state.players.set(client.sessionId, newPlayer);
-
-    client.send("joined", {
-      sessionId: client.sessionId,
-      message: "✅ Welcome to MMORPG Room!",
-      currentMap: newPlayer.mapID,
-    });
-
-    this.broadcast("player_joined", {
-      id: client.sessionId,
-      name: newPlayer.name,
-      characterID: newPlayer.characterID,
-      characterName: newPlayer.characterName,
-      characterClass: newPlayer.characterClass,
-      x: newPlayer.x,
-      y: newPlayer.y,
-      direction: newPlayer.direction,
-      moving: newPlayer.moving,
-      attacking: newPlayer.attacking,
-      mapID: newPlayer.mapID,
-      // Include all sprites
-      idleFront: newPlayer.idleFront,
-      idleBack: newPlayer.idleBack,
-      idleLeft: newPlayer.idleLeft,
-      idleRight: newPlayer.idleRight,
-      walkLeft: newPlayer.walkLeft,
-      walkRight: newPlayer.walkRight,
-      walkUp: newPlayer.walkUp,
-      walkDown: newPlayer.walkDown,
-      attackLeft: newPlayer.attackLeft,
-      attackRight: newPlayer.attackRight,
-      attackUp: newPlayer.attackUp,
-      attackDown: newPlayer.attackDown,
-      // Stats
-      currentHP: newPlayer.currentHP,
-      maxHP: newPlayer.maxHP,
-      currentMana: newPlayer.currentMana,
-      maxMana: newPlayer.maxMana,
-      currentEXP: newPlayer.currentEXP,
-      maxEXP: newPlayer.maxEXP,
-      level: newPlayer.level,
-    });
+  // ---- Max HP ----
+  if (p.MaxHP !== undefined && p.MaxHP !== null && !isNaN(Number(p.MaxHP))) {
+    newPlayer.maxHP = Number(p.MaxHP);
+  } else {
+    newPlayer.maxHP = 100; // fallback
   }
+
+  // ---- Current HP ----
+  // If Sheets/File didn't send CurrentHP → use full HP (maxHP)
+  if (p.CurrentHP !== undefined && p.CurrentHP !== null && !isNaN(Number(p.CurrentHP))) {
+    newPlayer.currentHP = Number(p.CurrentHP);
+  } else {
+    newPlayer.currentHP = newPlayer.maxHP;  // FULL HP (critical fix)
+  }
+
+  // ---- Mana ----
+  newPlayer.maxMana =
+    p.MaxMana !== undefined && p.MaxMana !== null ? Number(p.MaxMana) : 100;
+
+  newPlayer.currentMana =
+    p.CurrentMana !== undefined && p.CurrentMana !== null
+      ? Number(p.CurrentMana)
+      : newPlayer.maxMana;
+
+  // ---- EXP ----
+  newPlayer.maxEXP =
+    p.MaxEXP !== undefined && p.MaxEXP !== null ? Number(p.MaxEXP) : 100;
+
+  newPlayer.currentEXP =
+    p.CurrentEXP !== undefined && p.CurrentEXP !== null
+      ? Number(p.CurrentEXP)
+      : 0;
+
+  // ---- Other Stats ----
+  newPlayer.attack = Number(p.Attack) || 10;
+  newPlayer.defense = Number(p.Defense) || 5;
+  newPlayer.speed = Number(p.Speed) || 8;
+  newPlayer.critDamage = Number(p.CritDamage) || 100;
+  newPlayer.level = Number(p.Level) || 1;
+
+  // Sprites
+  newPlayer.idleFront = p.ImageURL_IdleFront || "";
+  newPlayer.idleBack = p.ImageURL_IdleBack || "";
+  newPlayer.idleLeft = p.ImageURL_IdleLeft || "";
+  newPlayer.idleRight = p.ImageURL_IdleRight || "";
+  newPlayer.walkLeft = p.ImageURL_Walk_Left || "";
+  newPlayer.walkRight = p.ImageURL_Walk_Right || "";
+  newPlayer.walkUp = p.ImageURL_Walk_Up || "";
+  newPlayer.walkDown = p.ImageURL_Walk_Down || "";
+  newPlayer.attackLeft = p.ImageURL_Attack_Left || "";
+  newPlayer.attackRight = p.ImageURL_Attack_Right || "";
+  newPlayer.attackUp = p.ImageURL_Attack_Up || "";
+  newPlayer.attackDown = p.ImageURL_Attack_Down || "";
+
+  // Add to state
+  this.state.players.set(client.sessionId, newPlayer);
+
+  // Send welcome packet
+  client.send("joined", {
+    sessionId: client.sessionId,
+    message: "✅ Welcome to MMORPG Room!",
+    currentMap: newPlayer.mapID,
+  });
+
+  // Announce to others
+  this.broadcast("player_joined", {
+    id: client.sessionId,
+    name: newPlayer.name,
+    characterID: newPlayer.characterID,
+    characterName: newPlayer.characterName,
+    characterClass: newPlayer.characterClass,
+    x: newPlayer.x,
+    y: newPlayer.y,
+    direction: newPlayer.direction,
+    moving: newPlayer.moving,
+    attacking: newPlayer.attacking,
+    mapID: newPlayer.mapID,
+    idleFront: newPlayer.idleFront,
+    idleBack: newPlayer.idleBack,
+    idleLeft: newPlayer.idleLeft,
+    idleRight: newPlayer.idleRight,
+    walkLeft: newPlayer.walkLeft,
+    walkRight: newPlayer.walkRight,
+    walkUp: newPlayer.walkUp,
+    walkDown: newPlayer.walkDown,
+    attackLeft: newPlayer.attackLeft,
+    attackRight: newPlayer.attackRight,
+    attackUp: newPlayer.attackUp,
+    attackDown: newPlayer.attackDown,
+    currentHP: newPlayer.currentHP,
+    maxHP: newPlayer.maxHP,
+    currentMana: newPlayer.currentMana,
+    maxMana: newPlayer.maxMana,
+    currentEXP: newPlayer.currentEXP,
+    maxEXP: newPlayer.maxEXP,
+    level: newPlayer.level,
+  });
+}
+
 
   // ============================================================
   // 🚪 PLAYER LEAVE
