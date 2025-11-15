@@ -35,6 +35,8 @@ class Player extends Schema {
     this.speed = 8;
     this.critDamage = 100;
     this.level = 1;
+    this.dead = false;
+
 
     // ✅ Sprite URLs
     this.idleFront = "";
@@ -58,6 +60,8 @@ defineTypes(Player, {
   characterID: "string",
   characterName: "string",
   characterClass: "string",
+  dead: "boolean",
+
 
   x: "number",
   y: "number",
@@ -411,52 +415,75 @@ this.broadcast("monster_hp_update", {
     });
 
     // ============================================================
-    // 🔁 PLAYER RESPAWN REQUEST (client → server)
-    // ============================================================
-    this.onMessage("player_request_respawn", (client) => {
-      const p = this.state.players.get(client.sessionId);
-      if (!p) return;
+// 🔁 PLAYER RESPAWN REQUEST (client → server)
+// ============================================================
+this.onMessage("player_request_respawn", (client) => {
+    const p = this.state.players.get(client.sessionId);
+    if (!p) return;
 
-      // Reset HP to full
-      p.currentHP = Number(p.maxHP || 100);
+    // ⛔ Ignore if not dead
+    if (!p.dead && p.currentHP > 0) return;
 
-      // --- Choose respawn coordinates ---
-      // Option A: use player's initial spawn saved in schema (if you store it)
-      // p.x = Number(p.spawnX ?? p.x ?? 300);
-      // p.y = Number(p.spawnY ?? p.y ?? 200);
+    console.log(`🔄 Respawning player ${p.name} at portal...`);
 
-      // --- Respawn at portal ---
-	const PORTAL_X = 300;  // ← put your portal left value here
-	const PORTAL_Y = 200;  // ← put your portal top value here
+    // --------------------------------------------------------
+    // 🧹 REMOVE PLAYER FROM ALL MONSTER AGGRO TABLES
+    // --------------------------------------------------------
+    this.state.monsters.forEach(mon => {
+        if (mon._aggroMap && mon._aggroMap.has(client.sessionId)) {
+            mon._aggroMap.delete(client.sessionId);
+        }
 
-	p.x = PORTAL_X;
-	p.y = PORTAL_Y;
+        // If monster has no more aggro targets, calm down
+        if (mon._aggroMap && mon._aggroMap.size === 0) {
+            mon.isAggro = false;
+            mon.targetPlayer = "";
+        }
+    });
 
+    // --------------------------------------------------------
+    // ❤️ Restore player HP
+    // --------------------------------------------------------
+    p.dead = false;
+    p.currentHP = p.maxHP;
 
-      // Ensure movement flags are reset
-      p.moving = false;
-      p.attacking = false;
-      p.direction = "down";
+    // --------------------------------------------------------
+    // 📍 Respawn to portal coordinates
+    // --------------------------------------------------------
+    const PORTAL_X = 300;
+    const PORTAL_Y = 200;
 
-      // Send respawn info only to the requesting client
-      client.send("player_respawn", {
-        x: Math.floor(p.x),
-        y: Math.floor(p.y),
+    p.x = PORTAL_X;
+    p.y = PORTAL_Y;
+
+    p.moving = false;
+    p.attacking = false;
+    p.direction = "down";
+
+    // --------------------------------------------------------
+    // 📩 Send respawn ONLY to the client
+    // --------------------------------------------------------
+    client.send("player_respawn", {
+        x: PORTAL_X,
+        y: PORTAL_Y,
         hp: p.currentHP,
         maxHP: p.maxHP
-      });
+    });
 
-      // Notify other clients about the player's new position (so they see the respawn)
-      this.broadcast("player_move", {
+    // --------------------------------------------------------
+    // 🌍 Update other players
+    // --------------------------------------------------------
+    this.broadcast("player_move", {
         id: client.sessionId,
-        x: Math.floor(p.x),
-        y: Math.floor(p.y),
-        direction: p.direction,
+        x: PORTAL_X,
+        y: PORTAL_Y,
         moving: false,
         attacking: false,
+        direction: "down",
         mapID: p.mapID
-      }, { except: client });
-    });
+    }, { except: client });
+});
+
 
 
     // ============================================================
@@ -784,15 +811,25 @@ if (now >= m.attackCooldown) {
   // PLAYER DIED
   // ---------------------------------------
   if (p.currentHP <= 0) {
+    // Mark player as DEAD (important!)
+    p.dead = true;
+
+    console.log(`💀 Player ${p.name} died.`);
+
+    // Remove this player from monster aggro
     m._aggroMap.delete(targetID);
 
-    // No players left = monster calms down
+    // Monster stops targeting dead player
     if (m._aggroMap.size === 0) {
-      m.isAggro = false;
-      m.targetPlayer = "";
-      startRegen(m);
+        m.isAggro = false;
+        m.targetPlayer = "";
+        startRegen(m);
     }
-  }
+
+    // STOP attacking dead player completely
+    return;
+}
+
 
   // Stop attack animation after short delay
   setTimeout(() => {
