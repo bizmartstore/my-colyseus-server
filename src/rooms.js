@@ -240,9 +240,6 @@ class MMORPGRoom extends Room {
     // ============================================================
 // ⚔️ PLAYER ATTACK MONSTER HANDLER (Realtime HP + Respawn)
 // ============================================================
-// ============================================================
-// ⚔️ PLAYER ATTACK MONSTER HANDLER (Ragnarok-style Damage + Respawn)
-// ============================================================
 this.onMessage("attack_monster", (client, data) => {
   const player = this.state.players.get(client.sessionId);
   if (!player) return;
@@ -293,19 +290,30 @@ this.onMessage("attack_monster", (client, data) => {
   }
 
   // ===========================================
-  // 🩸 Apply damage to monster
-  // ===========================================
-  monster.currentHP -= damage;
-  if (monster.currentHP < 0) monster.currentHP = 0;
+// 🩸 Apply damage to monster
+// ===========================================
+monster.currentHP -= damage;
+if (monster.currentHP < 0) monster.currentHP = 0;
 
-  // Broadcast HP + floating number
-  this.broadcast("monster_hp_update", {
-    monsterId: monster.id,
-    currentHP: monster.currentHP,
-    maxHP: monster.maxHP,
-    damage,
-    crit: isCrit,
-  });
+// ===========================================
+// 🧠 AGGRO — Monster targets the attacker
+// ===========================================
+if (!monster._aggroMap) monster._aggroMap = new Map();
+
+let currentAggro = monster._aggroMap.get(client.sessionId) || 0;
+monster._aggroMap.set(client.sessionId, currentAggro + damage + 25);
+
+// ===========================================
+// 📢 Broadcast HP + floating damage
+// ===========================================
+this.broadcast("monster_hp_update", {
+  monsterId: monster.id,
+  currentHP: monster.currentHP,
+  maxHP: monster.maxHP,
+  damage,
+  crit: isCrit,
+});
+
 
   // ===========================================
   // 💀 Handle monster death & respawn
