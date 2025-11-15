@@ -289,19 +289,24 @@ this.onMessage("attack_monster", (client, data) => {
     damage = Math.floor(damage + Number(player.Skill1_Damage));
   }
 
-  // ===========================================
+ // ===========================================
 // 🩸 Apply damage to monster
 // ===========================================
 monster.currentHP -= damage;
 if (monster.currentHP < 0) monster.currentHP = 0;
 
 // ===========================================
-// 🧠 AGGRO — Monster targets the attacker
+// 🧠 RAGNAROK-STYLE AGGRO (Monster becomes aggressive on hit)
 // ===========================================
 if (!monster._aggroMap) monster._aggroMap = new Map();
 
+// Add aggro weight
 let currentAggro = monster._aggroMap.get(client.sessionId) || 0;
-monster._aggroMap.set(client.sessionId, currentAggro + damage + 25);
+monster._aggroMap.set(client.sessionId, currentAggro + damage + 50);
+
+// Force monster to enter AGGRO state
+monster.isAggro = true;
+monster.targetPlayer = client.sessionId;
 
 // ===========================================
 // 📢 Broadcast HP + floating damage
@@ -313,6 +318,7 @@ this.broadcast("monster_hp_update", {
   damage,
   crit: isCrit,
 });
+
 
 
   // ===========================================
