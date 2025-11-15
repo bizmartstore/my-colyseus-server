@@ -425,11 +425,13 @@ this.broadcast("monster_hp_update", {
       // p.x = Number(p.spawnX ?? p.x ?? 300);
       // p.y = Number(p.spawnY ?? p.y ?? 200);
 
-      // Option B (simple): set to default room spawn (change to your preferred coords)
-      const DEFAULT_SPAWN_X = 300;
-      const DEFAULT_SPAWN_Y = 200;
-      p.x = DEFAULT_SPAWN_X;
-      p.y = DEFAULT_SPAWN_Y;
+      // --- Respawn at portal ---
+	const PORTAL_X = 300;  // ← put your portal left value here
+	const PORTAL_Y = 200;  // ← put your portal top value here
+
+	p.x = PORTAL_X;
+	p.y = PORTAL_Y;
+
 
       // Ensure movement flags are reset
       p.moving = false;
