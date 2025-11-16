@@ -454,9 +454,11 @@ this.onMessage("update_stats", (client, data) => {
 // 🔁 PLAYER RESPAWN REQUEST (client → server) — PORTAL VERSION
 // ============================================================
 this.onMessage("player_request_respawn", async (client, data) => {
-
     const p = this.state.players.get(client.sessionId);
     if (!p) return;
+
+    // ⛔ Ignore if not actually dead
+    if (!p.dead && p.currentHP > 0) return;
 
     console.log(`🔄 Respawning player ${p.name} (client-side portal respawn)`);
 
@@ -475,23 +477,26 @@ this.onMessage("player_request_respawn", async (client, data) => {
     });
 
     // --------------------------------------------------------
-    // ❤️ FULL HP RESTORE & RESET DEAD FLAG
+    // ❤️ FULL HP RESTORE
     // --------------------------------------------------------
-    p.dead = false;                 // <-- always reset (important!)
+    p.dead = false;
     p.currentHP = p.maxHP;
 
     // --------------------------------------------------------
-    // ❗ IMPORTANT ❗ DO NOT SET p.x or p.y
-    // The client already moved the player to the portal.
+    // ❗ IMPORTANT ❗
+    // DO NOT set p.x or p.y anymore!
+    // Client already respawned at portal location.
     // --------------------------------------------------------
+
     p.moving = false;
     p.attacking = false;
     p.direction = "down";
 
     // --------------------------------------------------------
-    // 📩 Send respawn info WITHOUT POSITION
+    // 📩 Send respawn info WITHOUT ANY POSITION
     // --------------------------------------------------------
     client.send("player_respawn", {
+        // NO x, NO y → client keeps its portal location
         hp: p.currentHP,
         maxHP: p.maxHP
     });
@@ -515,7 +520,6 @@ this.onMessage("player_request_respawn", async (client, data) => {
         console.error("❌ Failed to update Sheets HP:", err);
     }
 });
-
 
 
 
@@ -621,7 +625,14 @@ startMonsterAI() {
 
     let dx = newX - m.x;
     let dy = newY - m.y;
-    m.direction = Math.abs(dx) > Math.abs(dy) ? (dx < 0 ? "left" : "right") : (dy < 0 ? "up" : "down");
+    m.direction =
+      Math.abs(dx) > Math.abs(dy)
+        ? dx < 0
+          ? "left"
+          : "right"
+        : dy < 0
+        ? "up"
+        : "down";
     m.moving = true;
 
     const steps = 20;
@@ -644,7 +655,7 @@ startMonsterAI() {
         x: m.x,
         y: m.y,
         direction: m.direction,
-        moving: true
+        moving: true,
       });
 
       if (step >= steps) {
@@ -655,7 +666,10 @@ startMonsterAI() {
         this.broadcast("monster_update", { id: m.id, moving: false });
 
         clearTimeout(m._wanderTimer);
-        m._wanderTimer = setTimeout(() => wander(m), 1000 + Math.random() * 2500);
+        m._wanderTimer = setTimeout(
+          () => wander(m),
+          1000 + Math.random() * 2500
+        );
       }
     }, WANDER_STEP_MS);
   };
@@ -707,17 +721,16 @@ startMonsterAI() {
       this.broadcast("monster_regen", {
         monsterId: m.id,
         currentHP: m.currentHP,
-        maxHP: m.maxHP
+        maxHP: m.maxHP,
       });
 
       if (m.currentHP >= m.maxHP) {
         clearInterval(m._regenTimer);
         m._regenTimer = null;
       }
-
     }, REGEN_INTERVAL_MS);
   };
-
+}
   // ------------------------------------------------------------
   // 🟥 APPLY KNOCKBACK TO PLAYER
   // ------------------------------------------------------------
