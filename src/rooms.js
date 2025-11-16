@@ -267,7 +267,18 @@ this.onMessage("attack_monster", (client, data) => {
   if (!player) return;
 
   const monster = this.state.monsters.get(data.monsterId);
-  if (!monster) return;
+if (!monster) return;
+
+// 🚫 NEW FIX 1: Ignore attacks on monsters in other maps
+if (monster.mapID !== player.mapID) {
+  return;
+}
+
+// 🚫 NEW FIX 2: Ignore attacks while monster is invulnerable after respawn
+if (monster.invulnerable) {
+  return;
+}
+
 
   // ===========================================
   // ✅ Determine base damage and range check
