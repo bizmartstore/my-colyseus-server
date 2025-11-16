@@ -101,42 +101,52 @@ defineTypes(Player, {
 // 🧟 Monster Schema
 // ============================================================
 class Monster extends Schema {
-  constructor() {
+  constructor(data = {}) {
     super();
-    this.id = "";
-    this.name = "";
-    this.class = "";
-    this.level = 1;
-    this.x = 0;
-    this.y = 0;
-    this.direction = "down";
+
+    this.id = data.id || "";
+    this.name = data.name || "";
+    this.class = data.class || "";
+    this.level = data.level || 1;
+    this.x = data.x || 0;
+    this.y = data.y || 0;
+
+    this.direction = data.direction || "down";
     this.moving = false;
     this.attacking = false;
-    this.currentHP = 100;
-    this.maxHP = 100;
-    this.attack = 10;
-    this.defense = 5;
-    this.speed = 5;
-    this.critDamage = 100;
-    this.mapID = 1;
-    this.visible = true;
-    this.spawnX = 0;
-    this.spawnY = 0;
-    this.exp = data.exp;
 
-    // ✅ Monster Sprite URLs
-    this.idleLeft = "";
-    this.idleRight = "";
-    this.idleUp = "";
-    this.idleDown = "";
-    this.walkLeft = "";
-    this.walkRight = "";
-    this.walkUp = "";
-    this.walkDown = "";
-    this.attackLeft = "";
-    this.attackRight = "";
-    this.attackUp = "";
-    this.attackDown = "";
+    this.currentHP = data.currentHP || 100;
+    this.maxHP = data.maxHP || 100;
+
+    this.attack = data.attack || 10;
+    this.defense = data.defense || 5;
+    this.speed = data.speed || 5;
+    this.critDamage = data.critDamage || 100;
+
+    this.mapID = data.mapID || 1;
+    this.visible = true;
+
+    this.spawnX = data.spawnX ?? data.x ?? 0;
+    this.spawnY = data.spawnY ?? data.y ?? 0;
+
+    // ⭐ FULLY DYNAMIC EXP — NO HARDCODING
+    this.exp = data.exp || 0;
+
+    // Sprites
+    this.idleLeft = data.idleLeft || "";
+    this.idleRight = data.idleRight || "";
+    this.idleUp = data.idleUp || "";
+    this.idleDown = data.idleDown || "";
+
+    this.walkLeft = data.walkLeft || "";
+    this.walkRight = data.walkRight || "";
+    this.walkUp = data.walkUp || "";
+    this.walkDown = data.walkDown || "";
+
+    this.attackLeft = data.attackLeft || "";
+    this.attackRight = data.attackRight || "";
+    this.attackUp = data.attackUp || "";
+    this.attackDown = data.attackDown || "";
   }
 }
 
