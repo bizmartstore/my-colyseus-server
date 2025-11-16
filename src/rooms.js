@@ -104,19 +104,6 @@ class Monster extends Schema {
   constructor(data = {}) {
     super();
 
-    // --- runtime-only fields — MUST be created first ---
-    this._aggroMap = new Map();
-    this._wandering = false;
-    this._wanderTimer = null;
-    this._regenTimer = null;
-    this._lastBroadcast = 0;
-    this._forcedAggroTick = 0;
-    this.attackCooldown = 0;
-    this.invulnerable = false;
-    this._startWanderAfterRespawn = false;
-
-    // ---------------------------------------------------
-    // Now assign schema / persistable fields from data
     this.id = data.id || "";
     this.name = data.name || "";
     this.class = data.class || "";
@@ -137,13 +124,21 @@ class Monster extends Schema {
     this.critDamage = data.critDamage || 100;
 
     this.mapID = data.mapID || 1;
-    this.visible = data.visible !== undefined ? data.visible : true;
+    this.visible = true;
 
-    this.spawnX = (data.spawnX ?? data.x) ?? 0;
-    this.spawnY = (data.spawnY ?? data.y) ?? 0;
+    this.spawnX = data.spawnX ?? data.x ?? 0;
+    this.spawnY = data.spawnY ?? data.y ?? 0;
 
     // ⭐ FULLY DYNAMIC EXP — NO HARDCODING
     this.exp = data.exp || 0;
+    this._aggroMap = new Map();
+    this._wandering = false;
+    this._wanderTimer = null;
+    this._regenTimer = null;
+    this._lastBroadcast = 0;
+    this._forcedAggroTick = 0;
+    this.attackCooldown = 0;
+    this.invulnerable = false;
 
     // Sprites
     this.idleLeft = data.idleLeft || "";
@@ -264,205 +259,225 @@ class MMORPGRoom extends Room {
       });
     });
 
-   // ============================================================
-// ⚔️ PLAYER ATTACK MONSTER HANDLER (Auto-Hitbox + AoE + Respawn)
+    // ============================================================
+// ⚔️ PLAYER ATTACK MONSTER HANDLER (Realtime HP + Respawn)
 // ============================================================
 this.onMessage("attack_monster", (client, data) => {
   const player = this.state.players.get(client.sessionId);
   if (!player) return;
 
-  // ============================================================
-  // 1️⃣ HITBOX DETECTION — FIND MONSTERS AROUND PLAYER
-  // ============================================================
-  const SINGLE_RANGE = 48; // Melee range
-  const AOE_RANGE = Number(data.aoeRadius ?? 120);
-  const isAOE = !!data.aoe;
+  const monster = this.state.monsters.get(data.monsterId);
+  if (!monster) return;
 
-  let targets = [];
+  // ===========================================
+  // ✅ Determine base damage and range check
+  // ===========================================
+  const dx = player.x - monster.x;
+  const dy = player.y - monster.y;
+  const dist = Math.sqrt(dx * dx + dy * dy);
+  const meleeRange = 48;
 
-  this.state.monsters.forEach(mon => {
-    if (!mon.visible || mon.currentHP <= 0 || mon.invulnerable) return;
-    if (Number(mon.mapID) !== Number(player.mapID)) return;
+  if (dist > meleeRange) return; // too far, ignore attack
 
-    const dx = mon.x - player.x;
-    const dy = mon.y - player.y;
-    const dist = Math.hypot(dx, dy);
+  // ===========================================
+  // ⚔️ Compute Damage
+  // ===========================================
+  const attackPower = player.attack;
+  const defense = monster.defense;
+  const levelBonus = player.level * 2;
+  const base = attackPower + levelBonus;
 
-    if ((isAOE && dist <= AOE_RANGE) || (!isAOE && dist <= SINGLE_RANGE)) {
-      targets.push(mon);
-    }
-  });
+  const variance = base * (Math.random() * 0.2 - 0.1);
+  const defReduce = defense * 0.5;
 
-  if (targets.length === 0) return;
+  let damage = Math.max(1, Math.floor(base - defReduce + variance));
 
-  // Single-target → nearest
-  if (!isAOE) {
-    targets.sort((a, b) => Math.hypot(a.x - player.x, a.y - player.y) - Math.hypot(b.x - player.x, b.y - player.y));
-    targets = [targets[0]];
+  // ===========================================
+  // 💥 Critical hit (20%)
+  // ===========================================
+  const isCrit = Math.random() < 0.2;
+  if (isCrit) {
+    damage = Math.floor(damage * (player.critDamage / 100));
   }
 
-  // ============================================================
-  // 2️⃣ DAMAGE CALCULATION
-  // ============================================================
-  const computeDamage = (monster) => {
-    const attackPower = Number(player.attack ?? 0);
-    const defense = Number(monster.defense ?? 0);
-    const levelBonus = Number(player.level ?? 1) * 2;
-    const base = attackPower + levelBonus;
+  // ===========================================
+  // 💢 Optional skill damage bonus
+  // ===========================================
+  if (player.Skill1_Damage && !data.basicAttack) {
+    damage = Math.floor(damage + Number(player.Skill1_Damage));
+  }
 
-    const variance = base * (Math.random() * 0.2 - 0.1);
-    const defReduce = defense * 0.5;
+  // ===========================================
+  // 🩸 Apply damage
+  // ===========================================
+  monster.currentHP -= damage;
+  if (monster.currentHP < 0) monster.currentHP = 0;
 
-    let dmg = Math.max(1, Math.floor(base - defReduce + variance));
+  // ===========================================
+  // 🧠 Add Aggro
+  // ===========================================
+  if (!monster._aggroMap) monster._aggroMap = new Map();
 
-    // Critical
-    const isCrit = Math.random() < 0.2;
-    if (isCrit) dmg = Math.floor(dmg * (Number(player.critDamage ?? 100) / 100));
+  let currentAggro = monster._aggroMap.get(client.sessionId) || 0;
+  monster._aggroMap.set(client.sessionId, currentAggro + damage + 50);
 
-    // Skills
-    if (player.Skill1_Damage && !data.basicAttack) {
-      dmg += Number(player.Skill1_Damage);
-    }
+  monster.isAggro = true;
+  monster.targetPlayer = client.sessionId;
 
-    return { dmg, isCrit };
-  };
+  const prev = monster._aggroMap.get(client.sessionId) || 0;
+  monster._aggroMap.set(client.sessionId, prev + damage + 100);
 
-  // ============================================================
-  // 3️⃣ APPLY DAMAGE TO EACH TARGET
-  // ============================================================
-  targets.forEach(monster => {
-    const { dmg, isCrit } = computeDamage(monster);
+  monster._forcedAggroTick = Date.now();
 
-    // Reduce HP
-    monster.currentHP = Math.max(0, monster.currentHP - dmg);
+  // ===========================================
+  // 📢 Broadcast floating damage
+  // ===========================================
+  this.broadcast("monster_hp_update", {
+    monsterId: monster.id,
+    currentHP: monster.currentHP,
+    maxHP: monster.maxHP,
+    damage,
+    crit: isCrit,
+  });
 
-    // Aggro
-    if (!(monster._aggroMap instanceof Map)) monster._aggroMap = new Map();
-    const previous = monster._aggroMap.get(client.sessionId) || 0;
-    monster._aggroMap.set(client.sessionId, previous + dmg + 100);
+  // ===========================================
+  // 💀 MONSTER DEATH
+  // ===========================================
+  if (monster.currentHP <= 0) {
+    console.log(`💀 Monster ${monster.name} killed by ${player.name}`);
 
-    monster.isAggro = true;
-    monster.targetPlayer = client.sessionId;
-    monster._forcedAggroTick = Date.now();
+    this.broadcast("monster_killed", { monsterId: monster.id });
+    monster.visible = false;
 
-    // Floating damage
-    this.broadcast("monster_hp_update", {
+    this.broadcast("monster_visibility", {
       monsterId: monster.id,
-      currentHP: monster.currentHP,
-      maxHP: monster.maxHP,
-      damage: dmg,
-      crit: isCrit,
-      aoe: isAOE,
+      visible: false
     });
 
-    // ============================================================
-    // 4️⃣ MONSTER DEATH
-    // ============================================================
-    if (monster.currentHP <= 0) {
-      console.log(`💀 Monster ${monster.name} killed by ${player.name}`);
-
-      monster.visible = false;
-      monster.invulnerable = true; // prevent immediate attacks
-
-      this.broadcast("monster_killed", { monsterId: monster.id });
-      this.broadcast("monster_visibility", { monsterId: monster.id, visible: false });
-
-      // EXP reward
-      if (!isNaN(monster.exp)) {
-        player.currentEXP += Number(monster.exp);
-      }
-
-      // Level up
-      while (player.currentEXP >= player.maxEXP) {
-        player.currentEXP -= player.maxEXP;
-        player.level += 1;
-
-        player.maxHP += 10;
-        player.maxMana += 5;
-        player.attack += 2;
-        player.defense += 1;
-
-        player.currentHP = player.maxHP;
-        player.currentMana = player.maxMana;
-
-        player.maxEXP = Math.floor(player.maxEXP * 1.25);
-
-        this.broadcast("player_level_up", {
-          id: client.sessionId,
-          level: player.level,
-          maxHP: player.maxHP,
-          maxMana: player.maxMana,
-          attack: player.attack,
-          defense: player.defense,
-          maxEXP: player.maxEXP
-        });
-      }
-
-      this.broadcast("player_exp_update", {
-        id: client.sessionId,
-        exp: player.currentEXP,
-        maxEXP: player.maxEXP,
-        level: player.level
-      });
-
-      // Respawn
-      setTimeout(() => {
-        monster.currentHP = monster.maxHP;
-        monster.visible = true;
-
-        monster.x = monster.spawnX;
-        monster.y = monster.spawnY;
-
-        monster.isAggro = false;
-        monster.targetPlayer = "";
-        monster.attacking = false;
-        monster.moving = false;
-        monster.direction = "down";
-
-        if (monster._aggroMap) monster._aggroMap.clear();
-        if (monster._regenTimer) clearInterval(monster._regenTimer);
-        if (monster._wanderTimer) clearTimeout(monster._wanderTimer);
-
-        monster._wandering = false;
-        monster._lastBroadcast = 0;
-        monster._forcedAggroTick = 0;
-
-        monster.invulnerable = true;
-        setTimeout(() => (monster.invulnerable = false), 1500);
-
-        monster.attackCooldown = Date.now() + 2000;
-
-        this.broadcast("monster_respawn", {
-          monsterId: monster.id,
-          x: monster.x,
-          y: monster.y,
-          currentHP: monster.currentHP,
-          maxHP: monster.maxHP,
-          visible: true,
-          direction: "down",
-          moving: false,
-          attacking: false,
-          isAggro: false,
-        });
-
-        this.broadcast("monster_update", {
-          id: monster.id,
-          x: monster.x,
-          y: monster.y,
-          direction: "down",
-          moving: false,
-          attacking: false,
-        });
-
-        monster._startWanderAfterRespawn = true;
-      }, 10000);
+    // ======================================================
+    // ⭐ GIVE EXP TO PLAYER (Dynamic from Google Sheets)
+    // ======================================================
+    if (!isNaN(monster.exp)) {
+      player.currentEXP += Number(monster.exp);
     }
+
+    // ======================================================
+    // ⭐ LEVEL UP LOOP (handles multiple levels)
+    // ======================================================
+    while (player.currentEXP >= player.maxEXP) {
+      player.currentEXP -= player.maxEXP;
+      player.level += 1;
+
+      // Suggested stat growth (you can modify if needed)
+      player.maxHP += 10;
+      player.maxMana += 5;
+      player.attack += 2;
+      player.defense += 1;
+
+      // Heal player when leveling
+      player.currentHP = player.maxHP;
+      player.currentMana = player.maxMana;
+
+      // Increase next EXP cap
+      player.maxEXP = Math.floor(player.maxEXP * 1.25);
+
+      // Broadcast level-up
+      this.broadcast("player_level_up", {
+        id: client.sessionId,
+        level: player.level,
+        maxHP: player.maxHP,
+        maxMana: player.maxMana,
+        attack: player.attack,
+        defense: player.defense,
+        maxEXP: player.maxEXP
+      });
+    }
+
+    // ======================================================
+    // ⭐ Broadcast updated EXP
+    // ======================================================
+    this.broadcast("player_exp_update", {
+      id: client.sessionId,
+      exp: player.currentEXP,
+      maxEXP: player.maxEXP,
+      level: player.level
+    });
+
+
+// ⏳ Respawn monster (FULL RUNTIME RESET)
+setTimeout(() => {
+  // Restore HP + visibility
+  monster.currentHP = monster.maxHP;
+  monster.visible = true;
+
+  // Reset to spawn position
+  monster.x = monster.spawnX;
+  monster.y = monster.spawnY;
+
+  // ⭐ AI STATE RESET ⭐
+  monster.isAggro = false;
+  monster.targetPlayer = "";
+  monster.attacking = false;
+  monster.moving = false;
+  monster.direction = "down";
+
+  // Kill old aggro table (each monster MUST have their own map)
+  if (monster._aggroMap) monster._aggroMap.clear();
+
+  // Stop regen / wander timers
+  if (monster._regenTimer) {
+    clearInterval(monster._regenTimer);
+    monster._regenTimer = null;
+  }
+  if (monster._wanderTimer) {
+    clearTimeout(monster._wanderTimer);
+    monster._wanderTimer = null;
+  }
+
+  // Reset other AI internal states
+  monster._wandering = false;
+  monster._lastBroadcast = 0;
+  monster._forcedAggroTick = 0;
+
+  // ⭐ IMPORTANT: Monster can be hit again after respawn
+  monster.invulnerable = true;
+  setTimeout(() => {
+    monster.invulnerable = false;
+  }, 1500);
+
+  // Attack cooldown so it doesn’t instantly attack on spawn
+  monster.attackCooldown = Date.now() + 2000;
+
+  // Notify clients (force idle)
+  this.broadcast("monster_respawn", {
+    monsterId: monster.id,
+    x: monster.x,
+    y: monster.y,
+    currentHP: monster.currentHP,
+    maxHP: monster.maxHP,
+    visible: true,
+    direction: "down",
+    moving: false,
+    attacking: false,
+    isAggro: false,
   });
+
+  // Force stop attack animation on all clients
+  this.broadcast("monster_update", {
+    id: monster.id,
+    x: monster.x,
+    y: monster.y,
+    direction: "down",
+    moving: false,
+    attacking: false,
+  });
+
+  // ⭐ Mark to restart wandering
+  monster._startWanderAfterRespawn = true;
+
+}, 10000);
+  }
 });
-
-
-
-
 
 
 
@@ -759,12 +774,11 @@ startMonsterAI() {
   // ------------------------------------------------------------
   const ensureRuntime = (m) => {
     if (!(m._aggroMap instanceof Map)) m._aggroMap = new Map();
-    if (m._wandering === undefined) m._wandering = false;
-    if (m._wanderTimer === undefined) m._wanderTimer = null;
-    if (m._lastBroadcast === undefined) m._lastBroadcast = 0;
-    if (m._regenTimer === undefined) m._regenTimer = null;
-    if (m.attackCooldown === undefined) m.attackCooldown = 0;
-
+    if (!m._wandering) m._wandering = false;
+    if (!m._wanderTimer) m._wanderTimer = null;
+    if (!m._lastBroadcast) m._lastBroadcast = 0;
+    if (!m._regenTimer) m._regenTimer = null;
+    if (!m.attackCooldown) m.attackCooldown = 0;
   };
 
   // ------------------------------------------------------------
