@@ -104,6 +104,19 @@ class Monster extends Schema {
   constructor(data = {}) {
     super();
 
+    // --- runtime-only fields — MUST be created first ---
+    this._aggroMap = new Map();
+    this._wandering = false;
+    this._wanderTimer = null;
+    this._regenTimer = null;
+    this._lastBroadcast = 0;
+    this._forcedAggroTick = 0;
+    this.attackCooldown = 0;
+    this.invulnerable = false;
+    this._startWanderAfterRespawn = false;
+
+    // ---------------------------------------------------
+    // Now assign schema / persistable fields from data
     this.id = data.id || "";
     this.name = data.name || "";
     this.class = data.class || "";
@@ -124,21 +137,13 @@ class Monster extends Schema {
     this.critDamage = data.critDamage || 100;
 
     this.mapID = data.mapID || 1;
-    this.visible = true;
+    this.visible = data.visible !== undefined ? data.visible : true;
 
-    this.spawnX = data.spawnX ?? data.x ?? 0;
-    this.spawnY = data.spawnY ?? data.y ?? 0;
+    this.spawnX = (data.spawnX ?? data.x) ?? 0;
+    this.spawnY = (data.spawnY ?? data.y) ?? 0;
 
     // ⭐ FULLY DYNAMIC EXP — NO HARDCODING
     this.exp = data.exp || 0;
-    this._aggroMap = new Map();
-    this._wandering = false;
-    this._wanderTimer = null;
-    this._regenTimer = null;
-    this._lastBroadcast = 0;
-    this._forcedAggroTick = 0;
-    this.attackCooldown = 0;
-    this.invulnerable = false;
 
     // Sprites
     this.idleLeft = data.idleLeft || "";
@@ -266,21 +271,31 @@ this.onMessage("attack_monster", (client, data) => {
   const player = this.state.players.get(client.sessionId);
   if (!player) return;
 
-  const monster = this.state.monsters.get(data.monsterId);
+  // -------------------------------
+  // ⭐ Coerce & validate monster ID
+  // -------------------------------
+  const monsterId = String(data.monsterId || "");
+  const monster = this.state.monsters.get(monsterId);
   if (!monster) return;
 
+  // -------------------------------
+  // ⭐ Prevent hitting dead / invisible / invulnerable monsters
+  // -------------------------------
+  if (!monster.visible || monster.currentHP <= 0) return;
+  if (monster.invulnerable) return;
+
   // ===========================================
-  // ✅ Determine base damage and range check
+  // ⭐ Determine base damage + range check
   // ===========================================
   const dx = player.x - monster.x;
   const dy = player.y - monster.y;
   const dist = Math.sqrt(dx * dx + dy * dy);
   const meleeRange = 48;
 
-  if (dist > meleeRange) return; // too far, ignore attack
+  if (dist > meleeRange) return;
 
   // ===========================================
-  // ⚔️ Compute Damage
+  // ⭐ Compute Damage
   // ===========================================
   const attackPower = player.attack;
   const defense = monster.defense;
@@ -292,45 +307,37 @@ this.onMessage("attack_monster", (client, data) => {
 
   let damage = Math.max(1, Math.floor(base - defReduce + variance));
 
-  // ===========================================
-  // 💥 Critical hit (20%)
-  // ===========================================
+  // Critical hit
   const isCrit = Math.random() < 0.2;
   if (isCrit) {
     damage = Math.floor(damage * (player.critDamage / 100));
   }
 
-  // ===========================================
-  // 💢 Optional skill damage bonus
-  // ===========================================
+  // Optional skill bonus
   if (player.Skill1_Damage && !data.basicAttack) {
     damage = Math.floor(damage + Number(player.Skill1_Damage));
   }
 
   // ===========================================
-  // 🩸 Apply damage
+  // ⭐ Apply damage
   // ===========================================
   monster.currentHP -= damage;
   if (monster.currentHP < 0) monster.currentHP = 0;
 
   // ===========================================
-  // 🧠 Add Aggro
+  // ⭐ Add Aggro Safely (no duplicates)
   // ===========================================
-  if (!monster._aggroMap) monster._aggroMap = new Map();
+  if (!(monster._aggroMap instanceof Map)) monster._aggroMap = new Map();
 
-  let currentAggro = monster._aggroMap.get(client.sessionId) || 0;
-  monster._aggroMap.set(client.sessionId, currentAggro + damage + 50);
+  const oldAgg = monster._aggroMap.get(client.sessionId) || 0;
+  monster._aggroMap.set(client.sessionId, oldAgg + damage + 100);
 
   monster.isAggro = true;
   monster.targetPlayer = client.sessionId;
-
-  const prev = monster._aggroMap.get(client.sessionId) || 0;
-  monster._aggroMap.set(client.sessionId, prev + damage + 100);
-
   monster._forcedAggroTick = Date.now();
 
   // ===========================================
-  // 📢 Broadcast floating damage
+  // ⭐ Broadcast floating damage
   // ===========================================
   this.broadcast("monster_hp_update", {
     monsterId: monster.id,
@@ -346,42 +353,34 @@ this.onMessage("attack_monster", (client, data) => {
   if (monster.currentHP <= 0) {
     console.log(`💀 Monster ${monster.name} killed by ${player.name}`);
 
-    this.broadcast("monster_killed", { monsterId: monster.id });
     monster.visible = false;
+    this.broadcast("monster_killed", { monsterId: monster.id });
 
     this.broadcast("monster_visibility", {
       monsterId: monster.id,
       visible: false
     });
 
-    // ======================================================
-    // ⭐ GIVE EXP TO PLAYER (Dynamic from Google Sheets)
-    // ======================================================
+    // Give EXP
     if (!isNaN(monster.exp)) {
       player.currentEXP += Number(monster.exp);
     }
 
-    // ======================================================
-    // ⭐ LEVEL UP LOOP (handles multiple levels)
-    // ======================================================
+    // ========= LEVEL UP SYSTEM =========
     while (player.currentEXP >= player.maxEXP) {
       player.currentEXP -= player.maxEXP;
       player.level += 1;
 
-      // Suggested stat growth (you can modify if needed)
       player.maxHP += 10;
       player.maxMana += 5;
       player.attack += 2;
       player.defense += 1;
 
-      // Heal player when leveling
       player.currentHP = player.maxHP;
       player.currentMana = player.maxMana;
 
-      // Increase next EXP cap
       player.maxEXP = Math.floor(player.maxEXP * 1.25);
 
-      // Broadcast level-up
       this.broadcast("player_level_up", {
         id: client.sessionId,
         level: player.level,
@@ -393,9 +392,6 @@ this.onMessage("attack_monster", (client, data) => {
       });
     }
 
-    // ======================================================
-    // ⭐ Broadcast updated EXP
-    // ======================================================
     this.broadcast("player_exp_update", {
       id: client.sessionId,
       exp: player.currentEXP,
@@ -403,81 +399,71 @@ this.onMessage("attack_monster", (client, data) => {
       level: player.level
     });
 
+    // ===========================================
+    // ⏳ Respawn Process
+    // ===========================================
+    setTimeout(() => {
+      monster.currentHP = monster.maxHP;
+      monster.visible = true;
 
-// ⏳ Respawn monster (FULL RUNTIME RESET)
-setTimeout(() => {
-  // Restore HP + visibility
-  monster.currentHP = monster.maxHP;
-  monster.visible = true;
+      monster.x = monster.spawnX;
+      monster.y = monster.spawnY;
 
-  // Reset to spawn position
-  monster.x = monster.spawnX;
-  monster.y = monster.spawnY;
+      monster.isAggro = false;
+      monster.targetPlayer = "";
+      monster.attacking = false;
+      monster.moving = false;
+      monster.direction = "down";
 
-  // ⭐ AI STATE RESET ⭐
-  monster.isAggro = false;
-  monster.targetPlayer = "";
-  monster.attacking = false;
-  monster.moving = false;
-  monster.direction = "down";
+      if (monster._aggroMap) monster._aggroMap.clear();
 
-  // Kill old aggro table (each monster MUST have their own map)
-  if (monster._aggroMap) monster._aggroMap.clear();
+      if (monster._regenTimer) {
+        clearInterval(monster._regenTimer);
+        monster._regenTimer = null;
+      }
+      if (monster._wanderTimer) {
+        clearTimeout(monster._wanderTimer);
+        monster._wanderTimer = null;
+      }
 
-  // Stop regen / wander timers
-  if (monster._regenTimer) {
-    clearInterval(monster._regenTimer);
-    monster._regenTimer = null;
-  }
-  if (monster._wanderTimer) {
-    clearTimeout(monster._wanderTimer);
-    monster._wanderTimer = null;
-  }
+      monster._wandering = false;
+      monster._lastBroadcast = 0;
+      monster._forcedAggroTick = 0;
 
-  // Reset other AI internal states
-  monster._wandering = false;
-  monster._lastBroadcast = 0;
-  monster._forcedAggroTick = 0;
+      monster.invulnerable = true;
+      setTimeout(() => (monster.invulnerable = false), 1500);
 
-  // ⭐ IMPORTANT: Monster can be hit again after respawn
-  monster.invulnerable = true;
-  setTimeout(() => {
-    monster.invulnerable = false;
-  }, 1500);
+      monster.attackCooldown = Date.now() + 2000;
 
-  // Attack cooldown so it doesn’t instantly attack on spawn
-  monster.attackCooldown = Date.now() + 2000;
+      this.broadcast("monster_respawn", {
+        monsterId: monster.id,
+        x: monster.x,
+        y: monster.y,
+        currentHP: monster.currentHP,
+        maxHP: monster.maxHP,
+        visible: true,
+        direction: "down",
+        moving: false,
+        attacking: false,
+        isAggro: false,
+      });
 
-  // Notify clients (force idle)
-  this.broadcast("monster_respawn", {
-    monsterId: monster.id,
-    x: monster.x,
-    y: monster.y,
-    currentHP: monster.currentHP,
-    maxHP: monster.maxHP,
-    visible: true,
-    direction: "down",
-    moving: false,
-    attacking: false,
-    isAggro: false,
-  });
+      this.broadcast("monster_update", {
+        id: monster.id,
+        x: monster.x,
+        y: monster.y,
+        direction: "down",
+        moving: false,
+        attacking: false,
+      });
 
-  // Force stop attack animation on all clients
-  this.broadcast("monster_update", {
-    id: monster.id,
-    x: monster.x,
-    y: monster.y,
-    direction: "down",
-    moving: false,
-    attacking: false,
-  });
+      // ⭐ restart wander in AI loop
+      monster._startWanderAfterRespawn = true;
 
-  // ⭐ Mark to restart wandering
-  monster._startWanderAfterRespawn = true;
-
-}, 10000);
+    }, 10000);
   }
 });
+
 
 
 
