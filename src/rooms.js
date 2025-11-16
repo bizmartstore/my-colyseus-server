@@ -122,7 +122,7 @@ class Monster extends Schema {
     this.visible = true;
     this.spawnX = 0;
     this.spawnY = 0;
-
+    this.exp = data.exp;
 
     // ✅ Monster Sprite URLs
     this.idleLeft = "";
@@ -172,7 +172,7 @@ defineTypes(Monster, {
   visible: "boolean",
   spawnX: "number",
   spawnY: "number",
-
+  exp: "number",
 });
 
 // ============================================================
@@ -540,44 +540,83 @@ this.onMessage("player_request_respawn", async (client, data) => {
   }
 
   spawnDefaultMonsters() {
-    const monsters = [
-      {
-        id: "M001",
-        name: "Orc Soldier",
-        class: "Beast",
-        level: 1,
-        x: 490,
-        y: 260,
-        currentHP: 120,
-        maxHP: 120,
-        attack: 35,
-        defense: 13,
-        speed: 8,
-        critDamage: 100,
-        mapID: 1,
-        idleLeft: "https://i.ibb.co/93z4RPk8/Shadow-male-Assassin-Rogue-standing-in-a-poised-st-breathing-idle-west-1.gif",
-        idleRight: "https://i.ibb.co/XxVTbBxG/Shadow-male-Assassin-Rogue-standing-in-a-poised-st-breathing-idle-east-1.gif",
-        idleUp: "https://i.ibb.co/gFLNNQxv/Shadow-male-Assassin-Rogue-standing-in-a-poised-st-breathing-idle-north-1.gif",
-        idleDown: "https://i.ibb.co/zWptpc41/Shadow-male-Assassin-Rogue-standing-in-a-poised-st-breathing-idle-south-1.gif",
-        walkLeft: "https://i.ibb.co/TqmN8GXx/Shadow-male-Assassin-Rogue-standing-in-a-poised-st-running-4-frames-west.gif",
-        walkRight: "https://i.ibb.co/gMVNP0mJ/Shadow-male-Assassin-Rogue-standing-in-a-poised-st-running-4-frames-east.gif",
-        walkUp: "https://i.ibb.co/Pvbx1mrQ/Shadow-male-Assassin-Rogue-standing-in-a-poised-st-running-4-frames-north.gif",
-        walkDown: "https://i.ibb.co/k6BWK4BQ/ezgif-com-animated-gif-maker-5.gif",
-        attackLeft: "https://i.ibb.co/CKNkMfwb/Shadow-male-Assassin-Rogue-standing-in-a-poised-st-cross-punch-east2-ezgif-com-rotate.gif",
-        attackRight: "https://i.ibb.co/4gTn9xzM/Shadow-male-Assassin-Rogue-standing-in-a-poised-st-cross-punch-east-2.gif",
-        attackUp: "https://i.ibb.co/39B2HvNb/Shadow-male-Assassin-Rogue-standing-in-a-poised-st-cross-punch-north.gif",
-        attackDown: "https://i.ibb.co/M5sNBTyF/Shadow-male-Assassin-Rogue-standing-in-a-poised-st-cross-punch-south-1.gif",
-      }
-    ];
-
-    for (const m of monsters) {
-      const monster = new Monster();
-      Object.assign(monster, m);
-      this.state.monsters.set(m.id, monster);
+  const monsters = [
+    {
+      id: "M001",
+      name: "Orc Soldier",
+      class: "Beast",
+      level: 1,
+      x: 490,
+      y: 260,
+      currentHP: 120,
+      maxHP: 120,
+      attack: 35,
+      defense: 13,
+      speed: 8,
+      critDamage: 100,
+      mapID: 1,
+      exp: 50, // ⭐ EXP comes from your data (replace with Google Sheet later)
+      idleLeft: "https://i.ibb.co/93z4RPk8/Shadow-male-Assassin-Rogue-standing-in-a-poised-st-breathing-idle-west-1.gif",
+      idleRight: "https://i.ibb.co/XxVTbBxG/Shadow-male-Assassin-Rogue-standing-in-a-poised-st-breathing-idle-east-1.gif",
+      idleUp: "https://i.ibb.co/gFLNNQxv/Shadow-male-Assassin-Rogue-standing-in-a-poised-st-breathing-idle-north-1.gif",
+      idleDown: "https://i.ibb.co/zWptpc41/Shadow-male-Assassin-Rogue-standing-in-a-poised-st-breathing-idle-south-1.gif",
+      walkLeft: "https://i.ibb.co/TqmN8GXx/Shadow-male-Assassin-Rogue-standing-in-a-poised-st-running-4-frames-west.gif",
+      walkRight: "https://i.ibb.co/gMVNP0mJ/Shadow-male-Assassin-Rogue-standing-in-a-poised-st-running-4-frames-east.gif",
+      walkUp: "https://i.ibb.co/Pvbx1mrQ/Shadow-male-Assassin-Rogue-standing-in-a-poised-st-running-4-frames-north.gif",
+      walkDown: "https://i.ibb.co/k6BWK4BQ/ezgif-com-animated-gif-maker-5.gif",
+      attackLeft: "https://i.ibb.co/CKNkMfwb/Shadow-male-Assassin-Rogue-standing-in-a-poised-st-cross-punch-east2-ezgif-com-rotate.gif",
+      attackRight: "https://i.ibb.co/4gTn9xzM/Shadow-male-Assassin-Rogue-standing-in-a-poised-st-cross-punch-east-2.gif",
+      attackUp: "https://i.ibb.co/39B2HvNb/Shadow-male-Assassin-Rogue-standing-in-a-poised-st-cross-punch-north.gif",
+      attackDown: "https://i.ibb.co/M5sNBTyF/Shadow-male-Assassin-Rogue-standing-in-a-poised-st-cross-punch-south-1.gif",
     }
+  ];
 
-    console.log(`🧟 Spawned ${this.state.monsters.size} monsters`);
+  for (const m of monsters) {
+    const monster = new Monster({
+      id: m.id,
+      name: m.name,
+      class: m.class,
+      level: m.level,
+      x: m.x,
+      y: m.y,
+      maxHP: m.maxHP,
+      currentHP: m.maxHP,
+      attack: m.attack,
+      defense: m.defense,
+      speed: m.speed,
+      critDamage: m.critDamage,
+      mapID: m.mapID,
+
+      // ⭐ Respawn position
+      spawnX: m.x,
+      spawnY: m.y,
+
+      // ⭐ Dynamic EXP (NO HARD CODING)
+      exp: m.exp,
+
+      // Animations
+      idleLeft: m.idleLeft,
+      idleRight: m.idleRight,
+      idleUp: m.idleUp,
+      idleDown: m.idleDown,
+
+      walkLeft: m.walkLeft,
+      walkRight: m.walkRight,
+      walkUp: m.walkUp,
+      walkDown: m.walkDown,
+
+      attackLeft: m.attackLeft,
+      attackRight: m.attackRight,
+      attackUp: m.attackUp,
+      attackDown: m.attackDown,
+    });
+
+    this.state.monsters.set(monster.id, monster);
   }
+
+  console.log(`🧟 Spawned ${this.state.monsters.size} monsters`);
+}
+
 
 // ============================================================
 // 🧠 MONSTER AI — Random Wander + Aggro Follow + Attack
