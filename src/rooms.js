@@ -274,49 +274,40 @@ this.onMessage("attack_monster", (client, data) => {
   // ============================================================
   // 1️⃣ HITBOX DETECTION — FIND MONSTERS AROUND PLAYER
   // ============================================================
-  const SINGLE_RANGE = 48;                         // Melee range
-  const AOE_RANGE = data.aoeRadius ? Number(data.aoeRadius) : 120;
-  const isAOE = !!data.aoe;                        // aoe: true or false
+  const SINGLE_RANGE = 48; // Melee range
+  const AOE_RANGE = Number(data.aoeRadius ?? 120);
+  const isAOE = !!data.aoe;
 
   let targets = [];
 
   this.state.monsters.forEach(mon => {
     if (!mon.visible || mon.currentHP <= 0 || mon.invulnerable) return;
-
-    // must be same map
     if (Number(mon.mapID) !== Number(player.mapID)) return;
 
     const dx = mon.x - player.x;
     const dy = mon.y - player.y;
-    const dist = Math.sqrt(dx * dx + dy * dy);
+    const dist = Math.hypot(dx, dy);
 
-    if (isAOE) {
-      if (dist <= AOE_RANGE) targets.push(mon);
-    } else {
-      if (dist <= SINGLE_RANGE) targets.push(mon);
+    if ((isAOE && dist <= AOE_RANGE) || (!isAOE && dist <= SINGLE_RANGE)) {
+      targets.push(mon);
     }
   });
 
-  // No monster found
   if (targets.length === 0) return;
 
-  // Single-target attack → pick nearest monster
+  // Single-target → nearest
   if (!isAOE) {
-    targets.sort((a, b) => {
-      const da = Math.hypot(a.x - player.x, a.y - player.y);
-      const db = Math.hypot(b.x - player.x, b.y - player.y);
-      return da - db;
-    });
+    targets.sort((a, b) => Math.hypot(a.x - player.x, a.y - player.y) - Math.hypot(b.x - player.x, b.y - player.y));
     targets = [targets[0]];
   }
 
   // ============================================================
-  // 2️⃣ DAMAGE CALCULATION (same as your original)
+  // 2️⃣ DAMAGE CALCULATION
   // ============================================================
   const computeDamage = (monster) => {
-    const attackPower = player.attack;
-    const defense = monster.defense;
-    const levelBonus = player.level * 2;
+    const attackPower = Number(player.attack ?? 0);
+    const defense = Number(monster.defense ?? 0);
+    const levelBonus = Number(player.level ?? 1) * 2;
     const base = attackPower + levelBonus;
 
     const variance = base * (Math.random() * 0.2 - 0.1);
@@ -324,13 +315,13 @@ this.onMessage("attack_monster", (client, data) => {
 
     let dmg = Math.max(1, Math.floor(base - defReduce + variance));
 
-    // critical
+    // Critical
     const isCrit = Math.random() < 0.2;
-    if (isCrit) dmg = Math.floor(dmg * (player.critDamage / 100));
+    if (isCrit) dmg = Math.floor(dmg * (Number(player.critDamage ?? 100) / 100));
 
-    // skills
+    // Skills
     if (player.Skill1_Damage && !data.basicAttack) {
-      dmg = Math.floor(dmg + Number(player.Skill1_Damage));
+      dmg += Number(player.Skill1_Damage);
     }
 
     return { dmg, isCrit };
@@ -342,10 +333,10 @@ this.onMessage("attack_monster", (client, data) => {
   targets.forEach(monster => {
     const { dmg, isCrit } = computeDamage(monster);
 
-    // reduce HP
+    // Reduce HP
     monster.currentHP = Math.max(0, monster.currentHP - dmg);
 
-    // aggro
+    // Aggro
     if (!(monster._aggroMap instanceof Map)) monster._aggroMap = new Map();
     const previous = monster._aggroMap.get(client.sessionId) || 0;
     monster._aggroMap.set(client.sessionId, previous + dmg + 100);
@@ -354,7 +345,7 @@ this.onMessage("attack_monster", (client, data) => {
     monster.targetPlayer = client.sessionId;
     monster._forcedAggroTick = Date.now();
 
-    // floating damage
+    // Floating damage
     this.broadcast("monster_hp_update", {
       monsterId: monster.id,
       currentHP: monster.currentHP,
@@ -365,27 +356,23 @@ this.onMessage("attack_monster", (client, data) => {
     });
 
     // ============================================================
-    // 4️⃣ MONSTER DEATH (UNTOUCHED — EXACTLY AS YOUR ORIGINAL)
+    // 4️⃣ MONSTER DEATH
     // ============================================================
     if (monster.currentHP <= 0) {
-
       console.log(`💀 Monster ${monster.name} killed by ${player.name}`);
 
       monster.visible = false;
+      monster.invulnerable = true; // prevent immediate attacks
 
       this.broadcast("monster_killed", { monsterId: monster.id });
-
-      this.broadcast("monster_visibility", {
-        monsterId: monster.id,
-        visible: false
-      });
+      this.broadcast("monster_visibility", { monsterId: monster.id, visible: false });
 
       // EXP reward
       if (!isNaN(monster.exp)) {
         player.currentEXP += Number(monster.exp);
       }
 
-      // Level up loop (unchanged)
+      // Level up
       while (player.currentEXP >= player.maxEXP) {
         player.currentEXP -= player.maxEXP;
         player.level += 1;
@@ -418,7 +405,7 @@ this.onMessage("attack_monster", (client, data) => {
         level: player.level
       });
 
-      // Respawn (unchanged)
+      // Respawn
       setTimeout(() => {
         monster.currentHP = monster.maxHP;
         monster.visible = true;
@@ -433,14 +420,8 @@ this.onMessage("attack_monster", (client, data) => {
         monster.direction = "down";
 
         if (monster._aggroMap) monster._aggroMap.clear();
-        if (monster._regenTimer) {
-          clearInterval(monster._regenTimer);
-          monster._regenTimer = null;
-        }
-        if (monster._wanderTimer) {
-          clearTimeout(monster._wanderTimer);
-          monster._wanderTimer = null;
-        }
+        if (monster._regenTimer) clearInterval(monster._regenTimer);
+        if (monster._wanderTimer) clearTimeout(monster._wanderTimer);
 
         monster._wandering = false;
         monster._lastBroadcast = 0;
@@ -474,10 +455,11 @@ this.onMessage("attack_monster", (client, data) => {
         });
 
         monster._startWanderAfterRespawn = true;
-
       }, 10000);
     }
+  });
 });
+
 
 
 
