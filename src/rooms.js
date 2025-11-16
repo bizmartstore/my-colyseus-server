@@ -593,14 +593,21 @@ this.onMessage("player_request_respawn", async (client, data) => {
   }
 
   spawnDefaultMonsters() {
-  const monsters = [
-    {
+  const monsters = [];
+
+  // Generate 30 Orc Soldiers outside the left gate
+  for (let i = 0; i < 30; i++) {
+
+    const posX = 120 + Math.floor(Math.random() * 80); // 120–200
+    const posY = 460 + Math.floor(Math.random() * 80); // 460–540
+
+    monsters.push({
       id: "M001",
       name: "Orc Soldier",
       class: "Beast",
       level: 1,
-      x: 490,
-      y: 260,
+      x: posX,
+      y: posY,
       currentHP: 120,
       maxHP: 120,
       attack: 35,
@@ -608,7 +615,8 @@ this.onMessage("player_request_respawn", async (client, data) => {
       speed: 8,
       critDamage: 100,
       mapID: 1,
-      exp: 50, // ⭐ EXP comes from your data (replace with Google Sheet later)
+      exp: 10,
+
       idleLeft: "https://i.ibb.co/93z4RPk8/Shadow-male-Assassin-Rogue-standing-in-a-poised-st-breathing-idle-west-1.gif",
       idleRight: "https://i.ibb.co/XxVTbBxG/Shadow-male-Assassin-Rogue-standing-in-a-poised-st-breathing-idle-east-1.gif",
       idleUp: "https://i.ibb.co/gFLNNQxv/Shadow-male-Assassin-Rogue-standing-in-a-poised-st-breathing-idle-north-1.gif",
@@ -621,8 +629,8 @@ this.onMessage("player_request_respawn", async (client, data) => {
       attackRight: "https://i.ibb.co/4gTn9xzM/Shadow-male-Assassin-Rogue-standing-in-a-poised-st-cross-punch-east-2.gif",
       attackUp: "https://i.ibb.co/39B2HvNb/Shadow-male-Assassin-Rogue-standing-in-a-poised-st-cross-punch-north.gif",
       attackDown: "https://i.ibb.co/M5sNBTyF/Shadow-male-Assassin-Rogue-standing-in-a-poised-st-cross-punch-south-1.gif",
-    }
-  ];
+    });
+  }
 
   for (const m of monsters) {
     const monster = new Monster({
@@ -640,14 +648,11 @@ this.onMessage("player_request_respawn", async (client, data) => {
       critDamage: m.critDamage,
       mapID: m.mapID,
 
-      // ⭐ Respawn position
       spawnX: m.x,
       spawnY: m.y,
 
-      // ⭐ Dynamic EXP (NO HARD CODING)
       exp: m.exp,
 
-      // Animations
       idleLeft: m.idleLeft,
       idleRight: m.idleRight,
       idleUp: m.idleUp,
@@ -667,8 +672,9 @@ this.onMessage("player_request_respawn", async (client, data) => {
     this.state.monsters.set(monster.id, monster);
   }
 
-  console.log(`🧟 Spawned ${this.state.monsters.size} monsters`);
+  console.log(`🧟 Spawned ${this.state.monsters.size} monsters OUTSIDE the gate`);
 }
+
 
 
 // ============================================================
