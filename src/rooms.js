@@ -265,7 +265,7 @@ class MMORPGRoom extends Room {
     });
 
     // ============================================================
-// ⚔️ PLAYER ATTACK MONSTER HANDLER (Fully Safe, No Silent Fails)
+// ⚔️ PLAYER ATTACK MONSTER HANDLER (Realtime HP + Respawn)
 // ============================================================
 this.onMessage("attack_monster", (client, data) => {
   const player = this.state.players.get(client.sessionId);
@@ -276,27 +276,13 @@ this.onMessage("attack_monster", (client, data) => {
   // -------------------------------
   const monsterId = String(data.monsterId || "");
   const monster = this.state.monsters.get(monsterId);
-
-  if (!monster) {
-    console.warn(`[attack_monster] ❌ Monster not found: ${monsterId}`);
-    client.send("attack_result", { ok: false, reason: "monster_not_found", monsterId });
-    return;
-  }
+  if (!monster) return;
 
   // -------------------------------
   // ⭐ Prevent hitting dead / invisible / invulnerable monsters
   // -------------------------------
-  if (!monster.visible || monster.currentHP <= 0) {
-    console.warn(`[attack_monster] ❌ Monster not hittable (dead or invisible): ${monsterId}`);
-    client.send("attack_result", { ok: false, reason: "dead_or_invisible", monsterId });
-    return;
-  }
-
-  if (monster.invulnerable) {
-    console.warn(`[attack_monster] ❌ Monster invulnerable: ${monsterId}`);
-    client.send("attack_result", { ok: false, reason: "invulnerable", monsterId });
-    return;
-  }
+  if (!monster.visible || monster.currentHP <= 0) return;
+  if (monster.invulnerable) return;
 
   // ===========================================
   // ⭐ Determine base damage + range check
@@ -306,10 +292,7 @@ this.onMessage("attack_monster", (client, data) => {
   const dist = Math.sqrt(dx * dx + dy * dy);
   const meleeRange = 48;
 
-  if (dist > meleeRange) {
-    client.send("attack_result", { ok: false, reason: "out_of_range", monsterId });
-    return;
-  }
+  if (dist > meleeRange) return;
 
   // ===========================================
   // ⭐ Compute Damage
@@ -332,7 +315,7 @@ this.onMessage("attack_monster", (client, data) => {
 
   // Optional skill bonus
   if (player.Skill1_Damage && !data.basicAttack) {
-    damage += Number(player.Skill1_Damage);
+    damage = Math.floor(damage + Number(player.Skill1_Damage));
   }
 
   // ===========================================
@@ -342,12 +325,12 @@ this.onMessage("attack_monster", (client, data) => {
   if (monster.currentHP < 0) monster.currentHP = 0;
 
   // ===========================================
-  // ⭐ Add Aggro (per monster only)
+  // ⭐ Add Aggro Safely (no duplicates)
   // ===========================================
   if (!(monster._aggroMap instanceof Map)) monster._aggroMap = new Map();
 
-  const previousAggro = monster._aggroMap.get(client.sessionId) || 0;
-  monster._aggroMap.set(client.sessionId, previousAggro + damage + 100);
+  const oldAgg = monster._aggroMap.get(client.sessionId) || 0;
+  monster._aggroMap.set(client.sessionId, oldAgg + damage + 100);
 
   monster.isAggro = true;
   monster.targetPlayer = client.sessionId;
@@ -364,28 +347,26 @@ this.onMessage("attack_monster", (client, data) => {
     crit: isCrit,
   });
 
-  client.send("attack_result", { ok: true, monsterId, damage });
-
   // ===========================================
   // 💀 MONSTER DEATH
   // ===========================================
   if (monster.currentHP <= 0) {
-    console.log(`💀 Monster ${monster.id} killed by ${player.name}`);
+    console.log(`💀 Monster ${monster.name} killed by ${player.name}`);
 
     monster.visible = false;
-
     this.broadcast("monster_killed", { monsterId: monster.id });
+
     this.broadcast("monster_visibility", {
       monsterId: monster.id,
       visible: false
     });
 
-    // EXP
+    // Give EXP
     if (!isNaN(monster.exp)) {
       player.currentEXP += Number(monster.exp);
     }
 
-    // LEVEL LOOP
+    // ========= LEVEL UP SYSTEM =========
     while (player.currentEXP >= player.maxEXP) {
       player.currentEXP -= player.maxEXP;
       player.level += 1;
@@ -419,7 +400,7 @@ this.onMessage("attack_monster", (client, data) => {
     });
 
     // ===========================================
-    // ⏳ Respawn with full cleanup
+    // ⏳ Respawn Process
     // ===========================================
     setTimeout(() => {
       monster.currentHP = monster.maxHP;
@@ -476,12 +457,12 @@ this.onMessage("attack_monster", (client, data) => {
         attacking: false,
       });
 
+      // ⭐ restart wander in AI loop
       monster._startWanderAfterRespawn = true;
 
     }, 10000);
   }
 });
-
 
 
 
