@@ -760,11 +760,12 @@ startMonsterAI() {
   // ------------------------------------------------------------
   const ensureRuntime = (m) => {
     if (!(m._aggroMap instanceof Map)) m._aggroMap = new Map();
-    if (!m._wandering) m._wandering = false;
-    if (!m._wanderTimer) m._wanderTimer = null;
-    if (!m._lastBroadcast) m._lastBroadcast = 0;
-    if (!m._regenTimer) m._regenTimer = null;
-    if (!m.attackCooldown) m.attackCooldown = 0;
+    if (m._wandering === undefined) m._wandering = false;
+    if (m._wanderTimer === undefined) m._wanderTimer = null;
+    if (m._lastBroadcast === undefined) m._lastBroadcast = 0;
+    if (m._regenTimer === undefined) m._regenTimer = null;
+    if (m.attackCooldown === undefined) m.attackCooldown = 0;
+
   };
 
   // ------------------------------------------------------------
