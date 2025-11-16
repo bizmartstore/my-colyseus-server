@@ -4,6 +4,7 @@
 
 const http = require("http");
 const express = require("express");
+const cors = require("cors");
 const { Server } = require("colyseus");
 const { WebSocketTransport } = require("@colyseus/ws-transport");
 const { MMORPGRoom } = require("./rooms");
@@ -11,7 +12,16 @@ const { MMORPGRoom } = require("./rooms");
 const app = express();
 
 /* ============================================================
-   ✅ Health Check & Debug Endpoints
+   🌐 Enable CORS for ALL Origins (Google Apps Script required)
+   ============================================================ */
+app.use(cors({
+  origin: "*",   // <-- this fixes your CORS problems
+  methods: "GET,POST,PUT,DELETE,OPTIONS",
+  allowedHeaders: "Content-Type, Authorization",
+}));
+
+/* ============================================================
+   🔍 Health Check & Debug Endpoints
    ============================================================ */
 app.get("/", (req, res) => {
   res.send(`
@@ -33,7 +43,7 @@ app.get("/status", (req, res) => {
 });
 
 /* ============================================================
-   ⚙️ HTTP + WS Server Initialization
+   ⚙️ HTTP + WebSocket Server Setup
    ============================================================ */
 const server = http.createServer(app);
 
@@ -43,11 +53,11 @@ const gameServer = new Server({
     pingInterval: 4000,
     pingMaxRetries: 5,
   }),
-  seatReservationTime: 60,
+  seatReservationTime: 60, // 60 seconds to connect to room
 });
 
 /* ============================================================
-   🌍 Define a Single Room ("mmorpg_room")
+   🌍 Define Game Room ("mmorpg_room")
    ============================================================ */
 try {
   gameServer.define("mmorpg_room", MMORPGRoom);
@@ -57,15 +67,15 @@ try {
 }
 
 /* ============================================================
-   🎮 Start Listening (Render-compatible)
+   🚀 Start Server (Render Compatible)
    ============================================================ */
 const PORT = process.env.PORT || 2567;
 
 server.listen(PORT, () => {
-  console.log(`✅ Server running on port ${PORT}`);
-  console.log(`🌐 Health check: https://mmorpg-colyseus-server-0u0g.onrender.com/`);
-  console.log(`🔗 WebSocket: wss://mmorpg-colyseus-server-0u0g.onrender.com`);
   console.log("-----------------------------------------------------------");
+  console.log(`✅ Server running on port ${PORT}`);
+  console.log(`🌐 Health:   https://mmorpg-colyseus-server-0u0g.onrender.com/`);
+  console.log(`🔗 WebSocket: wss://mmorpg-colyseus-server-0u0g.onrender.com`);
   console.log("💡 Single shared room enabled: mmorpg_room");
   console.log("-----------------------------------------------------------");
 });
