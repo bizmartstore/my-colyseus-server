@@ -595,19 +595,46 @@ this.onMessage("player_request_respawn", async (client, data) => {
   spawnDefaultMonsters() {
   const monsters = [];
 
-  // Generate 30 Orc Soldiers outside the left gate
-  for (let i = 0; i < 30; i++) {
+  // ZONE B boundaries
+  const ZONE_B = {
+    xMin: 200,
+    xMax: 350,
+    yMin: 600,
+    yMax: 900
+  };
 
-    const posX = 120 + Math.floor(Math.random() * 80); // 120–200
-    const posY = 460 + Math.floor(Math.random() * 80); // 460–540
+  // Helper to generate a random valid position
+  const randomPosition = () => ({
+    x: ZONE_B.xMin + Math.floor(Math.random() * (ZONE_B.xMax - ZONE_B.xMin)),
+    y: ZONE_B.yMin + Math.floor(Math.random() * (ZONE_B.yMax - ZONE_B.yMin)),
+  });
+
+  // Helper to avoid overlapping (min distance 35px)
+  const isTooClose = (x, y, list) => {
+    const MIN_DISTANCE = 35; 
+    return list.some(m => {
+      const dx = m.x - x;
+      const dy = m.y - y;
+      return Math.sqrt(dx*dx + dy*dy) < MIN_DISTANCE;
+    });
+  };
+
+  // ⭐ Spawn 30 monsters in Zone B without overlapping
+  for (let i = 0; i < 30; i++) {
+    let pos;
+
+    // Try generating until no overlap
+    do {
+      pos = randomPosition();
+    } while (isTooClose(pos.x, pos.y, monsters));
 
     monsters.push({
-      id: "M001",
+      id: "M001_" + i,
       name: "Orc Soldier",
       class: "Beast",
       level: 1,
-      x: posX,
-      y: posY,
+      x: pos.x,
+      y: pos.y,
       currentHP: 120,
       maxHP: 120,
       attack: 35,
@@ -632,6 +659,7 @@ this.onMessage("player_request_respawn", async (client, data) => {
     });
   }
 
+  // Spawn into state
   for (const m of monsters) {
     const monster = new Monster({
       id: m.id,
@@ -672,7 +700,7 @@ this.onMessage("player_request_respawn", async (client, data) => {
     this.state.monsters.set(monster.id, monster);
   }
 
-  console.log(`🧟 Spawned ${this.state.monsters.size} monsters OUTSIDE the gate`);
+  console.log(`🧟 Spawned ${this.state.monsters.size} monsters`);
 }
 
 
