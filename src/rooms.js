@@ -451,16 +451,16 @@ this.onMessage("update_stats", (client, data) => {
 });
 
     // ============================================================
-// 🔁 PLAYER RESPAWN REQUEST (client → server) — FIXED
+// 🔁 PLAYER RESPAWN REQUEST (client → server) — PORTAL VERSION
 // ============================================================
 this.onMessage("player_request_respawn", async (client, data) => {
     const p = this.state.players.get(client.sessionId);
     if (!p) return;
 
-    // ⛔ Ignore if not dead
+    // ⛔ Ignore if not actually dead
     if (!p.dead && p.currentHP > 0) return;
 
-    console.log(`🔄 Respawning player ${p.name} at death location...`);
+    console.log(`🔄 Respawning player ${p.name} (client-side portal respawn)`);
 
     // --------------------------------------------------------
     // 🧹 REMOVE PLAYER FROM ALL MONSTER AGGRO TABLES
@@ -477,49 +477,32 @@ this.onMessage("player_request_respawn", async (client, data) => {
     });
 
     // --------------------------------------------------------
-    // ❤️ Restore HP Fully
+    // ❤️ FULL HP RESTORE
     // --------------------------------------------------------
     p.dead = false;
     p.currentHP = p.maxHP;
 
     // --------------------------------------------------------
-    // 📍 Respawn at Death Location (sent from client)
+    // ❗ IMPORTANT ❗
+    // DO NOT set p.x or p.y anymore!
+    // Client already respawned at portal location.
     // --------------------------------------------------------
-    const respX = Number(data?.deathX) || p.x;
-    const respY = Number(data?.deathY) || p.y;
-
-    p.x = respX;
-    p.y = respY;
 
     p.moving = false;
     p.attacking = false;
     p.direction = "down";
 
     // --------------------------------------------------------
-    // 📩 Send respawn to client
+    // 📩 Send respawn info WITHOUT ANY POSITION
     // --------------------------------------------------------
     client.send("player_respawn", {
-        x: respX,
-        y: respY,
+        // NO x, NO y → client keeps its portal location
         hp: p.currentHP,
         maxHP: p.maxHP
     });
 
     // --------------------------------------------------------
-    // 🌍 Notify other players
-    // --------------------------------------------------------
-    this.broadcast("player_move", {
-        id: client.sessionId,
-        x: respX,
-        y: respY,
-        moving: false,
-        attacking: false,
-        direction: "down",
-        mapID: p.mapID
-    }, { except: client });
-
-    // --------------------------------------------------------
-    // ⭐ SEND FULL HP BACK TO GOOGLE SHEETS ⭐
+    // ⭐ SAVE FULL HP TO GOOGLE SHEETS ⭐
     // --------------------------------------------------------
     try {
         await fetch("https://script.google.com/macros/s/AKfycbz14_p6dz4Y1_MpU6C3T-nIF9ebhEI7u_dlR6d8dxRSUqqRIKnC-PtHr_4qwWvv_LWLbg/exec", {
@@ -537,6 +520,7 @@ this.onMessage("player_request_respawn", async (client, data) => {
         console.error("❌ Failed to update Sheets HP:", err);
     }
 });
+
 
 
 
