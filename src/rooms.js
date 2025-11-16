@@ -453,14 +453,14 @@ this.onMessage("update_stats", (client, data) => {
     // ============================================================
 // 🔁 PLAYER RESPAWN REQUEST (client → server) — FIXED
 // ============================================================
-this.onMessage("player_request_respawn", async (client) => {
+this.onMessage("player_request_respawn", async (client, data) => {
     const p = this.state.players.get(client.sessionId);
     if (!p) return;
 
     // ⛔ Ignore if not dead
     if (!p.dead && p.currentHP > 0) return;
 
-    console.log(`🔄 Respawning player ${p.name} at portal...`);
+    console.log(`🔄 Respawning player ${p.name} at death location...`);
 
     // --------------------------------------------------------
     // 🧹 REMOVE PLAYER FROM ALL MONSTER AGGRO TABLES
@@ -483,13 +483,13 @@ this.onMessage("player_request_respawn", async (client) => {
     p.currentHP = p.maxHP;
 
     // --------------------------------------------------------
-    // 📍 Respawn at Portal Position
+    // 📍 Respawn at Death Location (sent from client)
     // --------------------------------------------------------
-    const PORTAL_X = 300;
-    const PORTAL_Y = 200;
+    const respX = Number(data?.deathX) || p.x;
+    const respY = Number(data?.deathY) || p.y;
 
-    p.x = PORTAL_X;
-    p.y = PORTAL_Y;
+    p.x = respX;
+    p.y = respY;
 
     p.moving = false;
     p.attacking = false;
@@ -499,8 +499,8 @@ this.onMessage("player_request_respawn", async (client) => {
     // 📩 Send respawn to client
     // --------------------------------------------------------
     client.send("player_respawn", {
-        x: PORTAL_X,
-        y: PORTAL_Y,
+        x: respX,
+        y: respY,
         hp: p.currentHP,
         maxHP: p.maxHP
     });
@@ -510,8 +510,8 @@ this.onMessage("player_request_respawn", async (client) => {
     // --------------------------------------------------------
     this.broadcast("player_move", {
         id: client.sessionId,
-        x: PORTAL_X,
-        y: PORTAL_Y,
+        x: respX,
+        y: respY,
         moving: false,
         attacking: false,
         direction: "down",
@@ -537,6 +537,7 @@ this.onMessage("player_request_respawn", async (client) => {
         console.error("❌ Failed to update Sheets HP:", err);
     }
 });
+
 
 
 
