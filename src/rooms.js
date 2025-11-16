@@ -454,11 +454,9 @@ this.onMessage("update_stats", (client, data) => {
 // 🔁 PLAYER RESPAWN REQUEST (client → server) — PORTAL VERSION
 // ============================================================
 this.onMessage("player_request_respawn", async (client, data) => {
+
     const p = this.state.players.get(client.sessionId);
     if (!p) return;
-
-    // ⛔ Ignore if not actually dead
-    if (!p.dead && p.currentHP > 0) return;
 
     console.log(`🔄 Respawning player ${p.name} (client-side portal respawn)`);
 
@@ -477,26 +475,23 @@ this.onMessage("player_request_respawn", async (client, data) => {
     });
 
     // --------------------------------------------------------
-    // ❤️ FULL HP RESTORE
+    // ❤️ FULL HP RESTORE & RESET DEAD FLAG
     // --------------------------------------------------------
-    p.dead = false;
+    p.dead = false;                 // <-- always reset (important!)
     p.currentHP = p.maxHP;
 
     // --------------------------------------------------------
-    // ❗ IMPORTANT ❗
-    // DO NOT set p.x or p.y anymore!
-    // Client already respawned at portal location.
+    // ❗ IMPORTANT ❗ DO NOT SET p.x or p.y
+    // The client already moved the player to the portal.
     // --------------------------------------------------------
-
     p.moving = false;
     p.attacking = false;
     p.direction = "down";
 
     // --------------------------------------------------------
-    // 📩 Send respawn info WITHOUT ANY POSITION
+    // 📩 Send respawn info WITHOUT POSITION
     // --------------------------------------------------------
     client.send("player_respawn", {
-        // NO x, NO y → client keeps its portal location
         hp: p.currentHP,
         maxHP: p.maxHP
     });
@@ -520,6 +515,7 @@ this.onMessage("player_request_respawn", async (client, data) => {
         console.error("❌ Failed to update Sheets HP:", err);
     }
 });
+
 
 
 
@@ -890,16 +886,24 @@ if (now >= m.attackCooldown) {
   });
 
 }
-
-  // ============================================================
-// 👋 PLAYER JOIN (FULLY FIXED – NO MORE 100/100 HP BUG)
+// ============================================================
+// 👋 PLAYER JOIN (FULLY FIXED – NO MORE STUCK AFTER DEATH)
 // ============================================================
 onJoin(client, options) {
+
+  // ------------------------------------------------------------
+  // 🔧 FIX 1: Remove old player instance if reconnecting
+  // ------------------------------------------------------------
+  if (this.state.players.has(client.sessionId)) {
+    console.log("♻️ Cleaning old player instance on reconnect");
+    this.state.players.delete(client.sessionId);
+  }
+
   const p = options.player || {};
   console.log(`👋 ${p.Email || "Unknown"} joined MMORPG room.`);
 
   // ------------------------------------------------------------
-  // 🛠️ Helper: Validate numeric stats (reject "", null, undefined)
+  // 🛠️ Helper: Validate numeric stats
   // ------------------------------------------------------------
   function validStat(v) {
     return v !== undefined && v !== null && v !== "" && !isNaN(Number(v));
@@ -925,24 +929,15 @@ onJoin(client, options) {
   newPlayer.mapID = validStat(p.MapID) ? Number(p.MapID) : 1;
 
   // ------------------------------------------------------------
-  // ❤️ FIXED HP LOADER (NO MORE RESET TO 100)
+  // ❤️ FIXED HP LOADER
   // ------------------------------------------------------------
-  // Max HP
-  if (validStat(p.MaxHP)) {
-    newPlayer.maxHP = Number(p.MaxHP);
-  } else {
-    newPlayer.maxHP = 100;  // fallback default
-  }
-
-  // Current HP
-  if (validStat(p.CurrentHP)) {
-    newPlayer.currentHP = Number(p.CurrentHP);
-  } else {
-    newPlayer.currentHP = newPlayer.maxHP; // full HP if not provided
-  }
+  newPlayer.maxHP = validStat(p.MaxHP) ? Number(p.MaxHP) : 100;
+  newPlayer.currentHP = validStat(p.CurrentHP)
+    ? Number(p.CurrentHP)
+    : newPlayer.maxHP;
 
   // ------------------------------------------------------------
-  // 🔵 Mana (safe loader)
+  // 🔵 Mana
   // ------------------------------------------------------------
   newPlayer.maxMana = validStat(p.MaxMana) ? Number(p.MaxMana) : 100;
   newPlayer.currentMana = validStat(p.CurrentMana)
@@ -950,12 +945,10 @@ onJoin(client, options) {
     : newPlayer.maxMana;
 
   // ------------------------------------------------------------
-  // 🟣 EXP (safe loader)
+  // 🟣 EXP
   // ------------------------------------------------------------
   newPlayer.maxEXP = validStat(p.MaxEXP) ? Number(p.MaxEXP) : 100;
-  newPlayer.currentEXP = validStat(p.CurrentEXP)
-    ? Number(p.CurrentEXP)
-    : 0;
+  newPlayer.currentEXP = validStat(p.CurrentEXP) ? Number(p.CurrentEXP) : 0;
 
   // ------------------------------------------------------------
   // 🟡 Other stats
@@ -983,6 +976,11 @@ onJoin(client, options) {
   newPlayer.attackRight = p.ImageURL_Attack_Right || "";
   newPlayer.attackUp = p.ImageURL_Attack_Up || "";
   newPlayer.attackDown = p.ImageURL_Attack_Down || "";
+
+  // ------------------------------------------------------------
+  // 🔧 FIX 2: Ensure not dead on join (important!)
+  // ------------------------------------------------------------
+  newPlayer.dead = false;
 
   // ------------------------------------------------------------
   // 🟩 Add player to game state
@@ -1034,7 +1032,6 @@ onJoin(client, options) {
     level: newPlayer.level,
   });
 }
-
 
 
   // ============================================================
