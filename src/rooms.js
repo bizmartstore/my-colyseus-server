@@ -262,24 +262,20 @@ this.onMessage("attack_monster", (client, data) => {
   if (dist > meleeRange) return; // too far, ignore attack
 
   // ===========================================
-  // ⚔️ Compute Damage (Ragnarok-inspired)
+  // ⚔️ Compute Damage
   // ===========================================
-  const attackPower = player.attack;       // e.g. 51
-  const defense = monster.defense;         // e.g. 13
-  const levelBonus = player.level * 2;     // scale by level
+  const attackPower = player.attack;
+  const defense = monster.defense;
+  const levelBonus = player.level * 2;
   const base = attackPower + levelBonus;
 
-  // ±10% variance
   const variance = base * (Math.random() * 0.2 - 0.1);
-
-  // soft defense formula
   const defReduce = defense * 0.5;
 
-  // final damage
   let damage = Math.max(1, Math.floor(base - defReduce + variance));
 
   // ===========================================
-  // 💥 Critical hit (20% chance)
+  // 💥 Critical hit (20%)
   // ===========================================
   const isCrit = Math.random() < 0.2;
   if (isCrit) {
@@ -287,71 +283,117 @@ this.onMessage("attack_monster", (client, data) => {
   }
 
   // ===========================================
-  // 💢 Optional Skill Damage Multiplier
+  // 💢 Optional skill damage bonus
   // ===========================================
   if (player.Skill1_Damage && !data.basicAttack) {
     damage = Math.floor(damage + Number(player.Skill1_Damage));
   }
 
- // ===========================================
-// 🩸 Apply damage to monster
-// ===========================================
-monster.currentHP -= damage;
-if (monster.currentHP < 0) monster.currentHP = 0;
-
-// ===========================================
-// 🧠 RAGNAROK-STYLE AGGRO (Monster becomes aggressive on hit)
-// ===========================================
-if (!monster._aggroMap) monster._aggroMap = new Map();
-
-// Add aggro weight
-let currentAggro = monster._aggroMap.get(client.sessionId) || 0;
-monster._aggroMap.set(client.sessionId, currentAggro + damage + 50);
-
-// ===========================================
-// 🧠 FORCE MONSTER TO CHASE PLAYER WHO HIT IT
-// ===========================================
-monster.isAggro = true;
-monster.targetPlayer = client.sessionId;
-
-// Add strong aggro weight
-if (!monster._aggroMap) monster._aggroMap = new Map();
-const prev = monster._aggroMap.get(client.sessionId) || 0;
-monster._aggroMap.set(client.sessionId, prev + damage + 100);
-
-// Wake up AI immediately
-monster._forcedAggroTick = Date.now();
-
-
-// ===========================================
-// 📢 Broadcast HP + floating damage
-// ===========================================
-this.broadcast("monster_hp_update", {
-  monsterId: monster.id,
-  currentHP: monster.currentHP,
-  maxHP: monster.maxHP,
-  damage,
-  crit: isCrit,
-});
-
-
+  // ===========================================
+  // 🩸 Apply damage
+  // ===========================================
+  monster.currentHP -= damage;
+  if (monster.currentHP < 0) monster.currentHP = 0;
 
   // ===========================================
-  // 💀 Handle monster death & respawn
+  // 🧠 Add Aggro
+  // ===========================================
+  if (!monster._aggroMap) monster._aggroMap = new Map();
+
+  let currentAggro = monster._aggroMap.get(client.sessionId) || 0;
+  monster._aggroMap.set(client.sessionId, currentAggro + damage + 50);
+
+  monster.isAggro = true;
+  monster.targetPlayer = client.sessionId;
+
+  const prev = monster._aggroMap.get(client.sessionId) || 0;
+  monster._aggroMap.set(client.sessionId, prev + damage + 100);
+
+  monster._forcedAggroTick = Date.now();
+
+  // ===========================================
+  // 📢 Broadcast floating damage
+  // ===========================================
+  this.broadcast("monster_hp_update", {
+    monsterId: monster.id,
+    currentHP: monster.currentHP,
+    maxHP: monster.maxHP,
+    damage,
+    crit: isCrit,
+  });
+
+  // ===========================================
+  // 💀 MONSTER DEATH
   // ===========================================
   if (monster.currentHP <= 0) {
     console.log(`💀 Monster ${monster.name} killed by ${player.name}`);
 
     this.broadcast("monster_killed", { monsterId: monster.id });
     monster.visible = false;
-    this.broadcast("monster_visibility", { monsterId: monster.id, visible: false });
 
-    // Respawn after 10 seconds
+    this.broadcast("monster_visibility", {
+      monsterId: monster.id,
+      visible: false
+    });
+
+    // ======================================================
+    // ⭐ GIVE EXP TO PLAYER (Dynamic from Google Sheets)
+    // ======================================================
+    if (!isNaN(monster.exp)) {
+      player.currentEXP += Number(monster.exp);
+    }
+
+    // ======================================================
+    // ⭐ LEVEL UP LOOP (handles multiple levels)
+    // ======================================================
+    while (player.currentEXP >= player.maxEXP) {
+      player.currentEXP -= player.maxEXP;
+      player.level += 1;
+
+      // Suggested stat growth (you can modify if needed)
+      player.maxHP += 10;
+      player.maxMana += 5;
+      player.attack += 2;
+      player.defense += 1;
+
+      // Heal player when leveling
+      player.currentHP = player.maxHP;
+      player.currentMana = player.maxMana;
+
+      // Increase next EXP cap
+      player.maxEXP = Math.floor(player.maxEXP * 1.25);
+
+      // Broadcast level-up
+      this.broadcast("player_level_up", {
+        id: client.sessionId,
+        level: player.level,
+        maxHP: player.maxHP,
+        maxMana: player.maxMana,
+        attack: player.attack,
+        defense: player.defense,
+        maxEXP: player.maxEXP
+      });
+    }
+
+    // ======================================================
+    // ⭐ Broadcast updated EXP
+    // ======================================================
+    this.broadcast("player_exp_update", {
+      id: client.sessionId,
+      exp: player.currentEXP,
+      maxEXP: player.maxEXP,
+      level: player.level
+    });
+
+    // ======================================================
+    // ⏳ Respawn monster
+    // ======================================================
     setTimeout(() => {
       monster.currentHP = monster.maxHP;
       monster.visible = true;
       monster.x = monster.spawnX || monster.x;
       monster.y = monster.spawnY || monster.y;
+
       this.broadcast("monster_respawn", {
         monsterId: monster.id,
         x: monster.x,
@@ -362,6 +404,7 @@ this.broadcast("monster_hp_update", {
     }, 10000);
   }
 });
+
 
 
     // ============================================================
