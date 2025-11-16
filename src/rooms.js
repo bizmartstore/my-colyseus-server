@@ -592,125 +592,91 @@ this.onMessage("player_request_respawn", async (client, data) => {
     this.setSimulationInterval(() => this.broadcastPatch(), 50);
   }
 
-  async spawnDefaultMonsters() {
-  console.log("📡 Loading monsters from Google Sheets...");
+  spawnDefaultMonsters() {
+  // ⭐ Base monster template (reuse for all monsters)
+  const baseMonster = {
+    name: "Orc Soldier",
+    class: "Beast",
+    level: 1,
+    maxHP: 120,
+    attack: 35,
+    defense: 13,
+    speed: 8,
+    critDamage: 100,
+    exp: 10,
+    mapID: 1,
 
-  const url = "https://script.google.com/macros/s/AKfycbz14_p6dz4Y1_MpU6C3T-nIF9ebhEI7u_dlR6d8dxRSUqqRIKnC-PtHr_4qwWvv_LWLbg/exec";
+    idleLeft: "https://i.ibb.co/93z4RPk8/Shadow-male-Assassin-Rogue-standing-in-a-poised-st-breathing-idle-west-1.gif",
+    idleRight: "https://i.ibb.co/XxVTbBxG/Shadow-male-Assassin-Rogue-standing-in-a-poised-st-breathing-idle-east-1.gif",
+    idleUp: "https://i.ibb.co/gFLNNQxv/Shadow-male-Assassin-Rogue-standing-in-a-poised-st-breathing-idle-north-1.gif",
+    idleDown: "https://i.ibb.co/zWptpc41/Shadow-male-Assassin-Rogue-standing-in-a-poised-st-breathing-idle-south-1.gif",
 
-  // ZONE B boundaries
-  const ZONE_B = {
-    xMin: 200,
-    xMax: 350,
-    yMin: 600,
-    yMax: 900,
+    walkLeft: "https://i.ibb.co/TqmN8GXx/Shadow-male-Assassin-Rogue-standing-in-a-poised-st-running-4-frames-west.gif",
+    walkRight: "https://i.ibb.co/gMVNP0mJ/Shadow-male-Assassin-Rogue-standing-in-a-poised-st-running-4-frames-east.gif",
+    walkUp: "https://i.ibb.co/Pvbx1mrQ/Shadow-male-Assassin-Rogue-standing-in-a-poised-st-running-4-frames-north.gif",
+    walkDown: "https://i.ibb.co/k6BWK4BQ/ezgif-com-animated-gif-maker-5.gif",
+
+    attackLeft: "https://i.ibb.co/CKNkMfwb/Shadow-male-Assassin-Rogue-standing-in-a-poised-st-cross-punch-east2-ezgif-com-rotate.gif",
+    attackRight: "https://i.ibb.co/4gTn9xzM/Shadow-male-Assassin-Rogue-standing-in-a-poised-st-cross-punch-east-2.gif",
+    attackUp: "https://i.ibb.co/39B2HvNb/Shadow-male-Assassin-Rogue-standing-in-a-poised-st-cross-punch-north.gif",
+    attackDown: "https://i.ibb.co/M5sNBTyF/Shadow-male-Assassin-Rogue-standing-in-a-poised-st-cross-punch-south-1.gif",
   };
 
-  // Generate a random valid position
-  const randomPosition = () => ({
-    x: ZONE_B.xMin + Math.floor(Math.random() * (ZONE_B.xMax - ZONE_B.xMin)),
-    y: ZONE_B.yMin + Math.floor(Math.random() * (ZONE_B.yMax - ZONE_B.yMin)),
-  });
+  // ⭐ Number of monsters to spawn
+  const totalToSpawn = 20;
 
-  // Prevent overlapping
-  const isTooClose = (x, y, list) => {
-    const MIN_DISTANCE = 35;
-    return list.some(m => {
-      const dx = m.x - x;
-      const dy = m.y - y;
-      return Math.sqrt(dx * dx + dy * dy) < MIN_DISTANCE;
+  let idNumber = 1;
+
+  for (let i = 0; i < totalToSpawn; i++) {
+    const id = `M${String(idNumber).padStart(3, "0")}`;
+    idNumber++;
+
+    // ⭐ Random spawn positions
+    const spawnX = 400 + Math.random() * 600;
+    const spawnY = 200 + Math.random() * 600;
+
+    const monster = new Monster({
+      id,
+      name: baseMonster.name,
+      class: baseMonster.class,
+      level: baseMonster.level,
+
+      x: spawnX,
+      y: spawnY,
+      spawnX,
+      spawnY,
+
+      maxHP: baseMonster.maxHP,
+      currentHP: baseMonster.maxHP,
+
+      attack: baseMonster.attack,
+      defense: baseMonster.defense,
+      speed: baseMonster.speed,
+      critDamage: baseMonster.critDamage,
+      exp: baseMonster.exp,
+      mapID: baseMonster.mapID,
+
+      idleLeft: baseMonster.idleLeft,
+      idleRight: baseMonster.idleRight,
+      idleUp: baseMonster.idleUp,
+      idleDown: baseMonster.idleDown,
+
+      walkLeft: baseMonster.walkLeft,
+      walkRight: baseMonster.walkRight,
+      walkUp: baseMonster.walkUp,
+      walkDown: baseMonster.walkDown,
+
+      attackLeft: baseMonster.attackLeft,
+      attackRight: baseMonster.attackRight,
+      attackUp: baseMonster.attackUp,
+      attackDown: baseMonster.attackDown,
     });
-  };
 
-  try {
-    // Fetch data from Google Sheets
-    const res = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        endpoint: "loadMonsters",   // <- Your Google Script endpoint name
-        sheetID: "1U3MFNEf7G32Gs10Z0s0NoiZ6PPP1TgsEVbRUFcmjr7Y"
-      }),
-    });
-
-    const json = await res.json();
-
-    if (!json.monsters) {
-      console.error("❌ Google Sheet did not return 'monsters' array:", json);
-      return;
-    }
-
-    const sheetMonsters = json.monsters;
-    console.log(`📥 Loaded ${sheetMonsters.length} monsters from Google Sheets`);
-
-    const finalMonsters = [];
-
-    // Assign random positions & avoid overlap
-    for (const data of sheetMonsters) {
-      let pos;
-
-      do {
-        pos = randomPosition();
-      } while (isTooClose(pos.x, pos.y, finalMonsters));
-
-      finalMonsters.push({
-        ...data,
-        x: pos.x,
-        y: pos.y,
-      });
-    }
-
-    // Spawn monsters into Colyseus state
-    for (const m of finalMonsters) {
-      const monster = new Monster({
-        id: m.MonsterID,
-        name: m.Name,
-        class: m.Class,
-        level: Number(m.Level),
-
-        x: m.x,
-        y: m.y,
-        spawnX: m.x,
-        spawnY: m.y,
-
-        maxHP: Number(m.BaseHP),
-        currentHP: Number(m.CurrentHP || m.BaseHP),
-        attack: Number(m.Attack),
-        defense: Number(m.Defense),
-        speed: Number(m.Speed),
-
-        critDamage: Number(m.CritDamage),
-        critChance: Number(m.CritChance),
-
-        exp: Number(m.Experience || 0),
-        mapID: Number(m.MapID || 1),
-
-        idleLeft: m.ImageURL_IdleLeft,
-        idleRight: m.ImageURL_IdleRight,
-        idleUp: m.ImageURL_IdleUp,
-        idleDown: m.ImageURL_IdleDown,
-
-        walkLeft: m.ImageURL_Walk_Left,
-        walkRight: m.ImageURL_Walk_Right,
-        walkUp: m.ImageURL_Walk_Up,
-        walkDown: m.ImageURL_Walk_Down,
-
-        attackLeft: m.ImageURL_Attack_Left,
-        attackRight: m.ImageURL_Attack_Right,
-        attackUp: m.ImageURL_Attack_Up,
-        attackDown: m.ImageURL_Attack_Down,
-      });
-
-      this.state.monsters.set(monster.id, monster);
-    }
-
-    console.log(`🧟 Spawned ${this.state.monsters.size} monsters from Google Sheets`);
-
-  } catch (err) {
-    console.error("❌ ERROR loading monsters from Google Sheets:", err);
+    this.state.monsters.set(monster.id, monster);
   }
+
+  console.log(`🧟 Spawned ${this.state.monsters.size} monsters`);
 }
-
-
 
 
 // ============================================================
