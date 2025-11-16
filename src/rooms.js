@@ -361,6 +361,19 @@ this.onMessage("attack_monster", (client, data) => {
       player.currentEXP += Number(monster.exp);
     }
 
+    // ⭐ SAVE EXP IMMEDIATELY
+    fetch("https://script.google.com/macros/s/AKfycbz14_p6dz4Y1_MpU6C3T-nIF9ebhEI7u_dlR6d8dxRSUqqRIKnC-PtHr_4qwWvv_LWLbg/exec", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        endpoint: "saveEXP",
+        email: player.email,
+        exp: player.currentEXP,
+        maxEXP: player.maxEXP,
+        level: player.level
+      })
+    }).catch(err => console.log("❌ Failed to save EXP:", err));
+
     // ======================================================
     // ⭐ LEVEL UP LOOP (handles multiple levels)
     // ======================================================
@@ -368,20 +381,16 @@ this.onMessage("attack_monster", (client, data) => {
       player.currentEXP -= player.maxEXP;
       player.level += 1;
 
-      // Suggested stat growth (you can modify if needed)
       player.maxHP += 10;
       player.maxMana += 5;
       player.attack += 2;
       player.defense += 1;
 
-      // Heal player when leveling
       player.currentHP = player.maxHP;
       player.currentMana = player.maxMana;
 
-      // Increase next EXP cap
       player.maxEXP = Math.floor(player.maxEXP * 1.25);
 
-      // Broadcast level-up
       this.broadcast("player_level_up", {
         id: client.sessionId,
         level: player.level,
@@ -391,6 +400,19 @@ this.onMessage("attack_monster", (client, data) => {
         defense: player.defense,
         maxEXP: player.maxEXP
       });
+
+      // ⭐ SAVE AFTER LEVEL UP TOO
+      fetch("https://script.google.com/macros/s/AKfycbz14_p6dz4Y1_MpU6C3T-nIF9ebhEI7u_dlR6d8dxRSUqqRIKnC-PtHr_4qwWvv_LWLbg/exec", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          endpoint: "saveEXP",
+          email: player.email,
+          exp: player.currentEXP,
+          maxEXP: player.maxEXP,
+          level: player.level
+        })
+      }).catch(err => console.log("❌ Failed to save EXP:", err));
     }
 
     // ======================================================
@@ -403,81 +425,67 @@ this.onMessage("attack_monster", (client, data) => {
       level: player.level
     });
 
+    // ⏳ Monster Respawn
+    setTimeout(() => {
+      monster.currentHP = monster.maxHP;
+      monster.visible = true;
+      monster.x = monster.spawnX;
+      monster.y = monster.spawnY;
 
-// ⏳ Respawn monster (FULL RUNTIME RESET)
-setTimeout(() => {
-  // Restore HP + visibility
-  monster.currentHP = monster.maxHP;
-  monster.visible = true;
+      monster.isAggro = false;
+      monster.targetPlayer = "";
+      monster.attacking = false;
+      monster.moving = false;
+      monster.direction = "down";
 
-  // Reset to spawn position
-  monster.x = monster.spawnX;
-  monster.y = monster.spawnY;
+      if (monster._aggroMap) monster._aggroMap.clear();
 
-  // ⭐ AI STATE RESET ⭐
-  monster.isAggro = false;
-  monster.targetPlayer = "";
-  monster.attacking = false;
-  monster.moving = false;
-  monster.direction = "down";
+      if (monster._regenTimer) {
+        clearInterval(monster._regenTimer);
+        monster._regenTimer = null;
+      }
+      if (monster._wanderTimer) {
+        clearTimeout(monster._wanderTimer);
+        monster._wanderTimer = null;
+      }
 
-  // Kill old aggro table (each monster MUST have their own map)
-  if (monster._aggroMap) monster._aggroMap.clear();
+      monster._wandering = false;
+      monster._lastBroadcast = 0;
+      monster._forcedAggroTick = 0;
 
-  // Stop regen / wander timers
-  if (monster._regenTimer) {
-    clearInterval(monster._regenTimer);
-    monster._regenTimer = null;
-  }
-  if (monster._wanderTimer) {
-    clearTimeout(monster._wanderTimer);
-    monster._wanderTimer = null;
-  }
+      monster.invulnerable = true;
+      setTimeout(() => (monster.invulnerable = false), 1500);
 
-  // Reset other AI internal states
-  monster._wandering = false;
-  monster._lastBroadcast = 0;
-  monster._forcedAggroTick = 0;
+      monster.attackCooldown = Date.now() + 2000;
 
-  // ⭐ IMPORTANT: Monster can be hit again after respawn
-  monster.invulnerable = true;
-  setTimeout(() => {
-    monster.invulnerable = false;
-  }, 1500);
+      this.broadcast("monster_respawn", {
+        monsterId: monster.id,
+        x: monster.x,
+        y: monster.y,
+        currentHP: monster.currentHP,
+        maxHP: monster.maxHP,
+        visible: true,
+        direction: "down",
+        moving: false,
+        attacking: false,
+        isAggro: false,
+      });
 
-  // Attack cooldown so it doesn’t instantly attack on spawn
-  monster.attackCooldown = Date.now() + 2000;
+      this.broadcast("monster_update", {
+        id: monster.id,
+        x: monster.x,
+        y: monster.y,
+        direction: "down",
+        moving: false,
+        attacking: false,
+      });
 
-  // Notify clients (force idle)
-  this.broadcast("monster_respawn", {
-    monsterId: monster.id,
-    x: monster.x,
-    y: monster.y,
-    currentHP: monster.currentHP,
-    maxHP: monster.maxHP,
-    visible: true,
-    direction: "down",
-    moving: false,
-    attacking: false,
-    isAggro: false,
-  });
+      monster._startWanderAfterRespawn = true;
 
-  // Force stop attack animation on all clients
-  this.broadcast("monster_update", {
-    id: monster.id,
-    x: monster.x,
-    y: monster.y,
-    direction: "down",
-    moving: false,
-    attacking: false,
-  });
-
-  // ⭐ Mark to restart wandering
-  monster._startWanderAfterRespawn = true;
-
-}, 10000);
+    }, 10000);
   }
 });
+
 
 
 
