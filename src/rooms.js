@@ -395,23 +395,50 @@ this.onMessage("attack_monster", (client, data) => {
       level: player.level
     });
 
-    // ======================================================
-    // ⏳ Respawn monster
-    // ======================================================
-    setTimeout(() => {
-      monster.currentHP = monster.maxHP;
-      monster.visible = true;
-      monster.x = monster.spawnX || monster.x;
-      monster.y = monster.spawnY || monster.y;
+    // ⏳ Respawn monster (FIXED — CLEAR AGGRO + NORMAL STATE)
+setTimeout(() => {
+  // Restore HP and visibility
+  monster.currentHP = monster.maxHP;
+  monster.visible = true;
 
-      this.broadcast("monster_respawn", {
-        monsterId: monster.id,
-        x: monster.x,
-        y: monster.y,
-        currentHP: monster.currentHP,
-        maxHP: monster.maxHP,
-      });
-    }, 10000);
+  // Reset position
+  monster.x = monster.spawnX || monster.x;
+  monster.y = monster.spawnY || monster.y;
+
+  // ⭐ FULL AGGRO RESET
+  monster.isAggro = false;
+  monster.targetPlayer = "";
+  monster.attacking = false;
+  monster.moving = false;
+
+  if (monster._aggroMap) {
+    monster._aggroMap.clear();
+  }
+
+  // ⭐ Stop regen timers & attack cooldowns
+  monster._regenTimer = null;
+  monster.attackCooldown = 0;
+
+  // ⭐ Reset animation
+  monster.direction = "down";
+
+  // ⭐ Anti-spawn-camp safety (optional)
+  monster.invulnerable = true;
+  setTimeout(() => {
+    monster.invulnerable = false;
+  }, 1500);
+
+  // Notify clients
+  this.broadcast("monster_respawn", {
+    monsterId: monster.id,
+    x: monster.x,
+    y: monster.y,
+    currentHP: monster.currentHP,
+    maxHP: monster.maxHP,
+    visible: true,
+    isAggro: false
+  });
+}, 10000);
   }
 });
 
@@ -593,7 +620,7 @@ this.onMessage("player_request_respawn", async (client, data) => {
   }
 
   spawnDefaultMonsters() {
-  // ⭐ Base monster template (reuse for all monsters)
+  // Base monster template
   const baseMonster = {
     name: "Orc Soldier",
     class: "Beast",
@@ -622,8 +649,14 @@ this.onMessage("player_request_respawn", async (client, data) => {
     attackDown: "https://i.ibb.co/M5sNBTyF/Shadow-male-Assassin-Rogue-standing-in-a-poised-st-cross-punch-south-1.gif",
   };
 
-  // ⭐ Number of monsters to spawn
+  // How many monsters to spawn
   const totalToSpawn = 20;
+
+  // ==== ZONE B (Left Center) ====
+  // Using your map's "Left Center" den: approximately { x: 600, y: 1600 }
+  // We'll spawn inside a radius around that point so monsters appear in "left-center below gate town".
+  const zoneBCenter = { x: 600, y: 1600 };
+  const zoneBRadius = 220; // radius in px (tweak as needed)
 
   let idNumber = 1;
 
@@ -631,9 +664,11 @@ this.onMessage("player_request_respawn", async (client, data) => {
     const id = `M${String(idNumber).padStart(3, "0")}`;
     idNumber++;
 
-    // ⭐ Random spawn positions
-    const spawnX = 400 + Math.random() * 600;
-    const spawnY = 200 + Math.random() * 600;
+    // Random point inside zoneB circle (uniform)
+    const angle = Math.random() * Math.PI * 2;
+    const r = Math.sqrt(Math.random()) * zoneBRadius; // sqrt for even distribution
+    const spawnX = Math.floor(zoneBCenter.x + Math.cos(angle) * r);
+    const spawnY = Math.floor(zoneBCenter.y + Math.sin(angle) * r);
 
     const monster = new Monster({
       id,
@@ -675,8 +710,9 @@ this.onMessage("player_request_respawn", async (client, data) => {
     this.state.monsters.set(monster.id, monster);
   }
 
-  console.log(`🧟 Spawned ${this.state.monsters.size} monsters`);
+  console.log(`🧟 Spawned ${this.state.monsters.size} monsters (Zone B left-center)`);
 }
+
 
 
 // ============================================================
