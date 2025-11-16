@@ -395,40 +395,49 @@ this.onMessage("attack_monster", (client, data) => {
       level: player.level
     });
 
-    // ⏳ Respawn monster (FIXED — CLEAR AGGRO + NORMAL STATE)
+    // ⏳ Respawn monster (FULL RUNTIME RESET)
 setTimeout(() => {
-  // Restore HP and visibility
+  // Restore HP + visibility
   monster.currentHP = monster.maxHP;
   monster.visible = true;
 
-  // Reset position
-  monster.x = monster.spawnX || monster.x;
-  monster.y = monster.spawnY || monster.y;
+  // Reset to spawn position
+  monster.x = monster.spawnX;
+  monster.y = monster.spawnY;
 
-  // ⭐ FULL AGGRO RESET
+  // ⭐ AI STATE RESET ⭐
   monster.isAggro = false;
   monster.targetPlayer = "";
   monster.attacking = false;
   monster.moving = false;
-
-  if (monster._aggroMap) {
-    monster._aggroMap.clear();
-  }
-
-  // ⭐ Stop regen timers & attack cooldowns
-  monster._regenTimer = null;
-  monster.attackCooldown = 0;
-
-  // ⭐ Reset animation
   monster.direction = "down";
 
-  // ⭐ Anti-spawn-camp safety (optional)
-  monster.invulnerable = true;
-  setTimeout(() => {
-    monster.invulnerable = false;
-  }, 1500);
+  // Kill old aggro table
+  if (monster._aggroMap) monster._aggroMap.clear();
 
-  // Notify clients
+  // Stop regen / wander timers
+  if (monster._regenTimer) {
+    clearInterval(monster._regenTimer);
+    monster._regenTimer = null;
+  }
+  if (monster._wanderTimer) {
+    clearTimeout(monster._wanderTimer);
+    monster._wanderTimer = null;
+  }
+
+  // Reset other AI internal states
+  monster._wandering = false;
+  monster._lastBroadcast = 0;
+  monster._forcedAggroTick = 0;
+
+  // Reset attack cooldown
+  monster.attackCooldown = Date.now() + 2000; // delay attack for 2 sec
+
+  // Spawn protection
+  monster.invulnerable = true;
+  setTimeout(() => (monster.invulnerable = false), 1500);
+
+  // Inform clients
   this.broadcast("monster_respawn", {
     monsterId: monster.id,
     x: monster.x,
@@ -436,8 +445,27 @@ setTimeout(() => {
     currentHP: monster.currentHP,
     maxHP: monster.maxHP,
     visible: true,
-    isAggro: false
+    direction: "down",
+    moving: false,
+    attacking: false,
+    isAggro: false,
   });
+
+  // ⭐ FORCE client to stop attack animation
+  this.broadcast("monster_update", {
+    id: monster.id,
+    x: monster.x,
+    y: monster.y,
+    direction: "down",
+    moving: false,
+    attacking: false,
+  });
+
+  // Restart wandering after 1.5 sec
+  setTimeout(() => {
+    monster._wandering = false;
+  }, 1500);
+
 }, 10000);
   }
 });
