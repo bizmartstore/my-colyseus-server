@@ -626,7 +626,7 @@ startMonsterAI() {
   const TICK_MS = 120;
   const WANDER_STEP_MS = 150;
   const CHASE_SPEED = 2.4;
-  const WANDDER_SPEED = 1.2;
+  const WANDER_SPEED = 1.2;
   const ATTACK_RANGE = 40;
   const CHASE_LEASH = 300;
   const ATTACK_COOLDOWN_MS = 1000;
@@ -635,7 +635,9 @@ startMonsterAI() {
   const KNOCKBACK_DISTANCE = 28;
   const SMOOTH_BROADCAST = 150;
 
+  // ------------------------------------------------------------
   // Ensure runtime fields
+  // ------------------------------------------------------------
   const ensureRuntime = (m) => {
     if (!m._aggroMap) m._aggroMap = new Map();
     if (!m._wandering) m._wandering = false;
@@ -666,12 +668,9 @@ startMonsterAI() {
     let dy = newY - m.y;
     m.direction =
       Math.abs(dx) > Math.abs(dy)
-        ? dx < 0
-          ? "left"
-          : "right"
-        : dy < 0
-        ? "up"
-        : "down";
+        ? dx < 0 ? "left" : "right"
+        : dy < 0 ? "up" : "down";
+
     m.moving = true;
 
     const steps = 20;
@@ -705,10 +704,7 @@ startMonsterAI() {
         this.broadcast("monster_update", { id: m.id, moving: false });
 
         clearTimeout(m._wanderTimer);
-        m._wanderTimer = setTimeout(
-          () => wander(m),
-          1000 + Math.random() * 2500
-        );
+        m._wanderTimer = setTimeout(() => wander(m), 1000 + Math.random() * 2500);
       }
     }, WANDER_STEP_MS);
   };
@@ -734,8 +730,7 @@ startMonsterAI() {
   // 🟦 DECAY AGGRO OVER TIME
   // ------------------------------------------------------------
   const decayAggro = (m) => {
-    const entries = Array.from(m._aggroMap.entries());
-    for (const [sid, w] of entries) {
+    for (const [sid, w] of m._aggroMap.entries()) {
       const newW = Math.max(0, w - 1);
       if (newW <= 0) m._aggroMap.delete(sid);
       else m._aggroMap.set(sid, newW);
@@ -769,9 +764,9 @@ startMonsterAI() {
       }
     }, REGEN_INTERVAL_MS);
   };
-}
+
   // ------------------------------------------------------------
-  // 🟥 APPLY KNOCKBACK TO PLAYER
+  // 🟥 APPLY KNOCKBACK TO PLAYER  (FIXED — INSIDE startMonsterAI)
   // ------------------------------------------------------------
   const knockback = (p, mx, my) => {
     const dx = p.x - mx;
@@ -782,9 +777,10 @@ startMonsterAI() {
     p.y += (dy / dist) * KNOCKBACK_DISTANCE;
 
     this.broadcast("player_knockback", {
-      playerId: Object.keys(this.state.players).find(id => this.state.players.get(id) === p),
+      playerId: Object.keys(this.state.players)
+        .find(id => this.state.players.get(id) === p),
       x: Math.floor(p.x),
-      y: Math.floor(p.y)
+      y: Math.floor(p.y),
     });
   };
 
@@ -822,29 +818,28 @@ startMonsterAI() {
       const dy = p.y - m.y;
       const dist = Math.sqrt(dx * dx + dy * dy);
 
+      // Out of leash range — reset aggro
       if (dist > CHASE_LEASH) {
-  // Remove aggro from this player
-  m._aggroMap.delete(targetID);
+        m._aggroMap.delete(targetID);
 
-  if (m._aggroMap.size === 0) {
-    m.isAggro = false;
-    m.targetPlayer = "";
-    startRegen(m);   // start healing
-  }
-  return;
-}
+        if (m._aggroMap.size === 0) {
+          m.isAggro = false;
+          m.targetPlayer = "";
+          startRegen(m);
+        }
+        return;
+      }
 
-
-      // ---------------------------------------
-      // CHASE PLAYER
-      // ---------------------------------------
+      // --------------------------------------------------------
+      // CHASE
+      // --------------------------------------------------------
       if (dist > ATTACK_RANGE) {
         m.x += (dx / dist) * CHASE_SPEED;
         m.y += (dy / dist) * CHASE_SPEED;
 
         m.direction = Math.abs(dx) > Math.abs(dy)
-          ? (dx > 0 ? "right" : "left")
-          : (dy > 0 ? "down" : "up");
+          ? dx > 0 ? "right" : "left"
+          : dy > 0 ? "down" : "up";
 
         m.moving = true;
 
@@ -855,76 +850,62 @@ startMonsterAI() {
             x: Math.floor(m.x),
             y: Math.floor(m.y),
             direction: m.direction,
-            moving: true
+            moving: true,
           });
         }
 
         return;
       }
 
-      // ---------------------------------------
-// ATTACK
-// ---------------------------------------
-m.moving = false;
+      // --------------------------------------------------------
+      // ATTACK
+      // --------------------------------------------------------
+      m.moving = false;
 
-if (now >= m.attackCooldown) {
-  m.attackCooldown = now + ATTACK_COOLDOWN_MS;
+      if (now >= m.attackCooldown) {
+        m.attackCooldown = now + ATTACK_COOLDOWN_MS;
 
-  m.attacking = true;
+        m.attacking = true;
 
-  // Play attack animation
-  this.broadcast("monster_play_attack", {
-    monsterId: m.id,
-    direction: m.direction
-  });
+        this.broadcast("monster_play_attack", {
+          monsterId: m.id,
+          direction: m.direction,
+        });
 
-  // Calculate damage
-  const damage = Math.max(1, Math.floor(m.attack - p.defense / 1.5));
-  p.currentHP = Math.max(0, p.currentHP - damage);
+        const damage = Math.max(1, Math.floor(m.attack - p.defense / 1.5));
+        p.currentHP = Math.max(0, p.currentHP - damage);
 
-  // Push player back
-  knockback(p, m.x, m.y);
+        knockback(p, m.x, m.y);
 
-  // Sync damage + HP to client
-  this.broadcast("monster_attack_player", {
-    monsterId: m.id,
-    playerId: targetID,
-    damage,
-    direction: m.direction,
-    playerHP: p.currentHP,
-    playerMaxHP: p.maxHP
-  });
+        this.broadcast("monster_attack_player", {
+          monsterId: m.id,
+          playerId: targetID,
+          damage,
+          direction: m.direction,
+          playerHP: p.currentHP,
+          playerMaxHP: p.maxHP,
+        });
 
-  // ---------------------------------------
-  // PLAYER DIED
-  // ---------------------------------------
-  if (p.currentHP <= 0) {
-    // Mark player as DEAD (important!)
-    p.dead = true;
+        if (p.currentHP <= 0) {
+          p.dead = true;
 
-    console.log(`💀 Player ${p.name} died.`);
+          console.log(`💀 Player ${p.name} died.`);
 
-    // Remove this player from monster aggro
-    m._aggroMap.delete(targetID);
+          m._aggroMap.delete(targetID);
 
-    // Monster stops targeting dead player
-    if (m._aggroMap.size === 0) {
-        m.isAggro = false;
-        m.targetPlayer = "";
-        startRegen(m);
-    }
+          if (m._aggroMap.size === 0) {
+            m.isAggro = false;
+            m.targetPlayer = "";
+            startRegen(m);
+          }
 
-    // STOP attacking dead player completely
-    return;
-}
+          return;
+        }
 
-
-  // Stop attack animation after short delay
-  setTimeout(() => {
-    m.attacking = false;
-  }, 350);
-}
-
+        setTimeout(() => {
+          m.attacking = false;
+        }, 350);
+      }
     });
 
   }, TICK_MS);
@@ -938,6 +919,7 @@ if (now >= m.attackCooldown) {
   });
 
 }
+
 // ============================================================
 // 👋 PLAYER JOIN (FULLY FIXED – NO MORE STUCK AFTER DEATH)
 // ============================================================
