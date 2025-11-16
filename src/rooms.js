@@ -267,18 +267,7 @@ this.onMessage("attack_monster", (client, data) => {
   if (!player) return;
 
   const monster = this.state.monsters.get(data.monsterId);
-if (!monster) return;
-
-// 🚫 NEW FIX 1: Ignore attacks on monsters in other maps
-if (monster.mapID !== player.mapID) {
-  return;
-}
-
-// 🚫 NEW FIX 2: Ignore attacks while monster is invulnerable after respawn
-if (monster.invulnerable) {
-  return;
-}
-
+  if (!monster) return;
 
   // ===========================================
   // ✅ Determine base damage and range check
@@ -790,10 +779,11 @@ startMonsterAI() {
     if (!m._lastBroadcast) m._lastBroadcast = 0;
     if (!m._regenTimer) m._regenTimer = null;
     if (!m.attackCooldown) m.attackCooldown = 0;
+    if (!m.directionIdle) m.directionIdle = "down";
   };
 
   // ------------------------------------------------------------
-  // 🟩 WANDER BEHAVIOR
+  // 🟩 WANDER BEHAVIOR (UPDATED WITH 7-SECOND IDLE)
   // ------------------------------------------------------------
   const wander = (m) => {
     if (!m || m.isAggro || !m.visible || m.currentHP <= 0) return;
@@ -811,6 +801,8 @@ startMonsterAI() {
 
     let dx = newX - m.x;
     let dy = newY - m.y;
+
+    // Determine walk direction
     m.direction =
       Math.abs(dx) > Math.abs(dy)
         ? dx < 0 ? "left" : "right"
@@ -841,16 +833,30 @@ startMonsterAI() {
         moving: true,
       });
 
+      // Reached wander destination
       if (step >= steps) {
         clearInterval(stepInterval);
+
         m._wandering = false;
         m.moving = false;
 
-        this.broadcast("monster_update", { id: m.id, moving: false });
+        // NEW: record idle direction
+        m.directionIdle = m.direction;
 
+        // NEW: broadcast idle animation
+        this.broadcast("monster_update", {
+          id: m.id,
+          x: m.x,
+          y: m.y,
+          direction: m.directionIdle,
+          moving: false,
+        });
+
+        // NEW: idle for exactly 7 seconds before walking again
         clearTimeout(m._wanderTimer);
-        m._wanderTimer = setTimeout(() => wander(m), 1000 + Math.random() * 2500);
+        m._wanderTimer = setTimeout(() => wander(m), 7000);
       }
+
     }, WANDER_STEP_MS);
   };
 
@@ -911,7 +917,7 @@ startMonsterAI() {
   };
 
   // ------------------------------------------------------------
-  // 🟥 APPLY KNOCKBACK TO PLAYER  (FIXED — INSIDE startMonsterAI)
+  // 🟥 APPLY KNOCKBACK TO PLAYER
   // ------------------------------------------------------------
   const knockback = (p, mx, my) => {
     const dx = p.x - mx;
@@ -930,60 +936,56 @@ startMonsterAI() {
   };
 
   // ------------------------------------------------------------
-// 🧠 MAIN AI LOOP — CHASE + ATTACK
-// ------------------------------------------------------------
-setInterval(() => {
-  const now = Date.now();
+  // 🧠 MAIN AI LOOP — CHASE + ATTACK
+  // ------------------------------------------------------------
+  setInterval(() => {
+    const now = Date.now();
 
-  this.state.monsters.forEach((m) => {
-    ensureRuntime(m);
+    this.state.monsters.forEach((m) => {
+      ensureRuntime(m);
 
-    // ⭐ Auto-start wandering after respawn (NEW FIX)
-    if (m._startWanderAfterRespawn && !m.isAggro && m.visible && m.currentHP > 0) {
-      m._startWanderAfterRespawn = false;
-      wander(m);
-    }
-
-    if (!m.visible || m.currentHP <= 0) return;
-
-    decayAggro(m);
-
-    const targetID = pickTopAggro(m);
-
-    if (!targetID) {
-      if (m.isAggro) {
-        m.isAggro = false;
-        m.targetPlayer = "";
-        startRegen(m);
+      if (m._startWanderAfterRespawn && !m.isAggro && m.visible && m.currentHP > 0) {
+        m._startWanderAfterRespawn = false;
+        wander(m);
       }
-      return;
-    }
 
-    m.isAggro = true;
-    m.targetPlayer = targetID;
+      if (!m.visible || m.currentHP <= 0) return;
 
-    const p = this.state.players.get(targetID);
-    if (!p) return;
+      decayAggro(m);
 
-    const dx = p.x - m.x;
-    const dy = p.y - m.y;
-    const dist = Math.sqrt(dx * dx + dy * dy);
+      const targetID = pickTopAggro(m);
 
-    // Out of leash range — reset aggro
-    if (dist > CHASE_LEASH) {
-      m._aggroMap.delete(targetID);
-
-      if (m._aggroMap.size === 0) {
-        m.isAggro = false;
-        m.targetPlayer = "";
-        startRegen(m);
+      if (!targetID) {
+        if (m.isAggro) {
+          m.isAggro = false;
+          m.targetPlayer = "";
+          startRegen(m);
+        }
+        return;
       }
-      return;
-    }
 
-      // --------------------------------------------------------
-      // CHASE
-      // --------------------------------------------------------
+      m.isAggro = true;
+      m.targetPlayer = targetID;
+
+      const p = this.state.players.get(targetID);
+      if (!p) return;
+
+      const dx = p.x - m.x;
+      const dy = p.y - m.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+
+      if (dist > CHASE_LEASH) {
+        m._aggroMap.delete(targetID);
+
+        if (m._aggroMap.size === 0) {
+          m.isAggro = false;
+          m.targetPlayer = "";
+          startRegen(m);
+        }
+        return;
+      }
+
+      // MOVE toward target
       if (dist > ATTACK_RANGE) {
         m.x += (dx / dist) * CHASE_SPEED;
         m.y += (dy / dist) * CHASE_SPEED;
@@ -996,6 +998,7 @@ setInterval(() => {
 
         if (now - m._lastBroadcast > SMOOTH_BROADCAST) {
           m._lastBroadcast = now;
+
           this.broadcast("monster_update", {
             id: m.id,
             x: Math.floor(m.x),
@@ -1008,9 +1011,7 @@ setInterval(() => {
         return;
       }
 
-      // --------------------------------------------------------
       // ATTACK
-      // --------------------------------------------------------
       m.moving = false;
 
       if (now >= m.attackCooldown) {
@@ -1070,6 +1071,7 @@ setInterval(() => {
   });
 
 }
+
 
 // ============================================================
 // 👋 PLAYER JOIN (FULLY FIXED – NO MORE STUCK AFTER DEATH)
