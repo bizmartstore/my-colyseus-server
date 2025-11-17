@@ -1186,10 +1186,16 @@ onJoin(client, options) {
   // 🎁 Send welcome packet
   // ------------------------------------------------------------
   client.send("joined", {
-    sessionId: client.sessionId,
-    message: "✅ Welcome to MMORPG Room!",
-    currentMap: newPlayer.mapID,
-  });
+  sessionId: client.sessionId,
+  message: "Welcome",
+  currentMap: newPlayer.mapID,
+
+  // ADD THESE
+  currentEXP: newPlayer.currentEXP,
+  maxEXP: newPlayer.maxEXP,
+  level: newPlayer.level
+});
+
 
   // ------------------------------------------------------------
   // 📢 Notify other players
