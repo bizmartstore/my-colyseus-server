@@ -1093,7 +1093,16 @@ async onJoin(client, options) {
   }
 
   const p = options.player || {};
-  const email = p.Email || client.sessionId;
+  const email =
+    (p.Email || p.email || p.EmailAddress || p.playerEmail || "").trim();
+
+if (!email) {
+    console.error("❌ ERROR: Player joined WITHOUT A VALID EMAIL");
+    client.send("error", { message: "Email missing in join payload." });
+    client.leave();
+    return;
+}
+
 
   console.log(`👋 ${email} joining MMORPG room...`);
 
