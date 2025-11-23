@@ -1082,83 +1082,94 @@ startMonsterAI() {
 
 
 // ============================================================
-// 👋 PLAYER JOIN (FULLY FIXED – NO MORE STUCK AFTER DEATH)
+// 👋 PLAYER JOIN (NOW LOADS EXP/LEVEL/HP FROM GOOGLE SHEETS)
 // ============================================================
-onJoin(client, options) {
+async onJoin(client, options) {
 
-  // ------------------------------------------------------------
-  // 🔧 FIX 1: Remove old player instance if reconnecting
-  // ------------------------------------------------------------
+  // Remove old session if reconnecting
   if (this.state.players.has(client.sessionId)) {
     console.log("♻️ Cleaning old player instance on reconnect");
     this.state.players.delete(client.sessionId);
   }
 
   const p = options.player || {};
-  console.log(`👋 ${p.Email || "Unknown"} joined MMORPG room.`);
+  const email = p.Email || client.sessionId;
 
-  // ------------------------------------------------------------
-  // 🛠️ Helper: Validate numeric stats
-  // ------------------------------------------------------------
-  function validStat(v) {
-    return v !== undefined && v !== null && v !== "" && !isNaN(Number(v));
+  console.log(`👋 ${email} joining MMORPG room...`);
+
+  // ============================================================
+  // ⭐ STEP 1 — LOAD STATS FROM GOOGLE SHEETS ⭐
+  // ============================================================
+  let sheetStats = null;
+
+  try {
+    const res = await fetch(
+      "https://script.google.com/macros/s/AKfycbz14_p6dz4Y1_MpU6C3T-nIF9ebhEI7u_dlR6d8dxRSUqqRIKnC-PtHr_4qwWvv_LWLbg/exec",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          endpoint: "loadStats",
+          email: email
+        })
+      }
+    );
+
+    sheetStats = await res.json();
+    console.log(`📥 Loaded stats from Sheets for ${email}:`, sheetStats);
+
+  } catch (err) {
+    console.error("❌ Failed to load stats from Sheets:", err);
   }
 
+  // If Google Sheets failed, use fallback
+  if (!sheetStats) {
+    sheetStats = {
+      maxHP: p.MaxHP || 100,
+      currentHP: p.CurrentHP || 100,
+      maxMana: p.MaxMana || 100,
+      currentMana: p.CurrentMana || 100,
+      maxEXP: p.MaxEXP || 100,
+      currentEXP: p.CurrentEXP || 0,
+      level: p.Level || 1,
+      attack: p.Attack || 10,
+      defense: p.Defense || 5,
+      speed: p.Speed || 8,
+      critDamage: p.CritDamage || 100
+    };
+  }
+
+  // ============================================================
+  // ⭐ STEP 2 — CREATE PLAYER WITH SAVED STATS ⭐
+  // ============================================================
   const newPlayer = new Player();
 
-  // ------------------------------------------------------------
-  // 📌 Basic identity
-  // ------------------------------------------------------------
-  newPlayer.email = p.Email || client.sessionId;
+  // Identity
+  newPlayer.email = email;
   newPlayer.name = p.PlayerName || "Guest";
   newPlayer.characterID = p.CharacterID || "C000";
   newPlayer.characterName = p.CharacterName || "Unknown";
   newPlayer.characterClass = p.CharacterClass || "Adventurer";
 
-  // ------------------------------------------------------------
-  // 📌 Position (safe loader)
-  // ------------------------------------------------------------
-  newPlayer.x = validStat(p.PositionX) ? Number(p.PositionX) : 300;
-  newPlayer.y = validStat(p.PositionY) ? Number(p.PositionY) : 200;
-  newPlayer.animation = p.MovementAnimation || "IdleFront";
-  newPlayer.mapID = validStat(p.MapID) ? Number(p.MapID) : 1;
+  // Position
+  newPlayer.x = Number(p.PositionX || 300);
+  newPlayer.y = Number(p.PositionY || 200);
+  newPlayer.mapID = Number(p.MapID || 1);
 
-  // ------------------------------------------------------------
-  // ❤️ FIXED HP LOADER
-  // ------------------------------------------------------------
-  newPlayer.maxHP = validStat(p.MaxHP) ? Number(p.MaxHP) : 100;
-  newPlayer.currentHP = validStat(p.CurrentHP)
-    ? Number(p.CurrentHP)
-    : newPlayer.maxHP;
+  // ⭐ LOAD SAVED STATS ⭐
+  newPlayer.level = Number(sheetStats.level);
+  newPlayer.maxHP = Number(sheetStats.maxHP);
+  newPlayer.currentHP = Number(sheetStats.currentHP);
+  newPlayer.maxMana = Number(sheetStats.maxMana);
+  newPlayer.currentMana = Number(sheetStats.currentMana);
+  newPlayer.maxEXP = Number(sheetStats.maxEXP);
+  newPlayer.currentEXP = Number(sheetStats.currentEXP);
+  newPlayer.attack = Number(sheetStats.attack);
+  newPlayer.defense = Number(sheetStats.defense);
+  newPlayer.speed = Number(sheetStats.speed);
+  newPlayer.critDamage = Number(sheetStats.critDamage);
 
-  // ------------------------------------------------------------
-  // 🔵 Mana
-  // ------------------------------------------------------------
-  newPlayer.maxMana = validStat(p.MaxMana) ? Number(p.MaxMana) : 100;
-  newPlayer.currentMana = validStat(p.CurrentMana)
-    ? Number(p.CurrentMana)
-    : newPlayer.maxMana;
-
-  // ------------------------------------------------------------
-  // 🟣 EXP
-  // ------------------------------------------------------------
-  newPlayer.maxEXP = validStat(p.MaxEXP) ? Number(p.MaxEXP) : 100;
-  newPlayer.currentEXP = validStat(p.CurrentEXP) ? Number(p.CurrentEXP) : 0;
-
-  // ------------------------------------------------------------
-  // 🟡 Other stats
-  // ------------------------------------------------------------
-  newPlayer.attack = validStat(p.Attack) ? Number(p.Attack) : 10;
-  newPlayer.defense = validStat(p.Defense) ? Number(p.Defense) : 5;
-  newPlayer.speed = validStat(p.Speed) ? Number(p.Speed) : 8;
-  newPlayer.critDamage = validStat(p.CritDamage)
-    ? Number(p.CritDamage)
-    : 100;
-  newPlayer.level = validStat(p.Level) ? Number(p.Level) : 1;
-
-  // ------------------------------------------------------------
-  // 🖼️ Sprites
-  // ------------------------------------------------------------
+  // Sprites
   newPlayer.idleFront = p.ImageURL_IdleFront || "";
   newPlayer.idleBack = p.ImageURL_IdleBack || "";
   newPlayer.idleLeft = p.ImageURL_IdleLeft || "";
@@ -1172,34 +1183,28 @@ onJoin(client, options) {
   newPlayer.attackUp = p.ImageURL_Attack_Up || "";
   newPlayer.attackDown = p.ImageURL_Attack_Down || "";
 
-  // ------------------------------------------------------------
-  // 🔧 FIX 2: Ensure not dead on join (important!)
-  // ------------------------------------------------------------
   newPlayer.dead = false;
 
-  // ------------------------------------------------------------
-  // 🟩 Add player to game state
-  // ------------------------------------------------------------
+  // Add to room
   this.state.players.set(client.sessionId, newPlayer);
 
-  // ------------------------------------------------------------
-  // 🎁 Send welcome packet
-  // ------------------------------------------------------------
+  // ============================================================
+  // ⭐ STEP 3 — SEND JOIN PACKET WITH REAL STATS ⭐
+  // ============================================================
   client.send("joined", {
-  sessionId: client.sessionId,
-  message: "Welcome",
-  currentMap: newPlayer.mapID,
+    sessionId: client.sessionId,
+    message: "Welcome",
+    currentMap: newPlayer.mapID,
+    currentHP: newPlayer.currentHP,
+    maxHP: newPlayer.maxHP,
+    currentMana: newPlayer.currentMana,
+    maxMana: newPlayer.maxMana,
+    currentEXP: newPlayer.currentEXP,
+    maxEXP: newPlayer.maxEXP,
+    level: newPlayer.level
+  });
 
-  // ADD THESE
-  currentEXP: newPlayer.currentEXP,
-  maxEXP: newPlayer.maxEXP,
-  level: newPlayer.level
-});
-
-
-  // ------------------------------------------------------------
-  // 📢 Notify other players
-  // ------------------------------------------------------------
+  // Notify others
   this.broadcast("player_joined", {
     id: client.sessionId,
     name: newPlayer.name,
@@ -1208,29 +1213,17 @@ onJoin(client, options) {
     characterClass: newPlayer.characterClass,
     x: newPlayer.x,
     y: newPlayer.y,
+    mapID: newPlayer.mapID,
     direction: newPlayer.direction,
     moving: newPlayer.moving,
     attacking: newPlayer.attacking,
-    mapID: newPlayer.mapID,
-    idleFront: newPlayer.idleFront,
-    idleBack: newPlayer.idleBack,
-    idleLeft: newPlayer.idleLeft,
-    idleRight: newPlayer.idleRight,
-    walkLeft: newPlayer.walkLeft,
-    walkRight: newPlayer.walkRight,
-    walkUp: newPlayer.walkUp,
-    walkDown: newPlayer.walkDown,
-    attackLeft: newPlayer.attackLeft,
-    attackRight: newPlayer.attackRight,
-    attackUp: newPlayer.attackUp,
-    attackDown: newPlayer.attackDown,
     currentHP: newPlayer.currentHP,
     maxHP: newPlayer.maxHP,
     currentMana: newPlayer.currentMana,
     maxMana: newPlayer.maxMana,
     currentEXP: newPlayer.currentEXP,
     maxEXP: newPlayer.maxEXP,
-    level: newPlayer.level,
+    level: newPlayer.level
   });
 }
 
