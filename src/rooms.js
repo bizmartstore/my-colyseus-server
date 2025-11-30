@@ -678,20 +678,20 @@ this.onMessage("player_request_respawn", async (client, data) => {
     exp: 10,
     mapID: 1,
 
-    idleLeft: "https://storage.googleapis.com/flutterflow-io-6f20.appspot.com/projects/the-green-cart-rahmnf/assets/npgz8n4zfb3n/SKLL_IDLE_LEFT.gif",
-    idleRight: "https://storage.googleapis.com/flutterflow-io-6f20.appspot.com/projects/the-green-cart-rahmnf/assets/o75iz3ekiq2o/SKL_IDLE_RIGHT.gif",
-    idleUp: "https://storage.googleapis.com/flutterflow-io-6f20.appspot.com/projects/the-green-cart-rahmnf/assets/dx6bv3oj1svc/SKL_IDLE_BACK.gif",
-    idleDown: "https://storage.googleapis.com/flutterflow-io-6f20.appspot.com/projects/the-green-cart-rahmnf/assets/o7kmc3fx5ep6/SKL_IDLE_FRONT.gif",
+    idleLeft: "https://storage.googleapis.com/flutterflow-io-6f20.appspot.com/projects/the-green-cart-rahmnf/assets/y4qhx8gy0kog/REAPER_IDLE_LEFT.gif",
+    idleRight: "https://storage.googleapis.com/flutterflow-io-6f20.appspot.com/projects/the-green-cart-rahmnf/assets/o4k3chk1upwh/REPEAR_IDLE_RIGHT.gif",
+    idleUp: "https://storage.googleapis.com/flutterflow-io-6f20.appspot.com/projects/the-green-cart-rahmnf/assets/3n3wzjkqzvmc/REAPER_IDLE_BACK.gif",
+    idleDown: "https://storage.googleapis.com/flutterflow-io-6f20.appspot.com/projects/the-green-cart-rahmnf/assets/pakkkxc5c6al/REAPER_IDLE_FRONT.gif",
 
-    walkLeft: "https://storage.googleapis.com/flutterflow-io-6f20.appspot.com/projects/the-green-cart-rahmnf/assets/f0r0h4zso9hg/SKL_WALK_LEFT.gif",
-    walkRight: "https://storage.googleapis.com/flutterflow-io-6f20.appspot.com/projects/the-green-cart-rahmnf/assets/m5jcwxsy6b47/SKL_WALK_RIGHT.gif",
-    walkUp: "https://storage.googleapis.com/flutterflow-io-6f20.appspot.com/projects/the-green-cart-rahmnf/assets/ztxeac8qb221/SKL_WALK_BACK.gif",
-    walkDown: "https://storage.googleapis.com/flutterflow-io-6f20.appspot.com/projects/the-green-cart-rahmnf/assets/eudpdjxkvcaa/SKL_WALK_FRONT.gif",
+    walkLeft: "https://storage.googleapis.com/flutterflow-io-6f20.appspot.com/projects/the-green-cart-rahmnf/assets/gxmnkcn8c8qq/REAPER_WALK_LEFT.gif",
+    walkRight: "https://storage.googleapis.com/flutterflow-io-6f20.appspot.com/projects/the-green-cart-rahmnf/assets/a60gyazg4scz/REAPER_WALK_RIGHT.gif",
+    walkUp: "https://storage.googleapis.com/flutterflow-io-6f20.appspot.com/projects/the-green-cart-rahmnf/assets/cmgajnf0womj/REAPER_WALK_UP.gif",
+    walkDown: "https://storage.googleapis.com/flutterflow-io-6f20.appspot.com/projects/the-green-cart-rahmnf/assets/nr7afv8x8ptx/REAPER_WALK_DOWN.gif",
 
-    attackLeft: "https://storage.googleapis.com/flutterflow-io-6f20.appspot.com/projects/the-green-cart-rahmnf/assets/sx0qtx2myj4k/SKL_ATTACK_LEFT.gif",
-    attackRight: "https://storage.googleapis.com/flutterflow-io-6f20.appspot.com/projects/the-green-cart-rahmnf/assets/wj7dmhdajknp/SKL_ATTACK_RIGHT.gif",
-    attackUp: "https://storage.googleapis.com/flutterflow-io-6f20.appspot.com/projects/the-green-cart-rahmnf/assets/g236h86sjc13/SKL_ATTACK_BACK.gif",
-    attackDown: "https://storage.googleapis.com/flutterflow-io-6f20.appspot.com/projects/the-green-cart-rahmnf/assets/tcblvdrpyha6/SKL_ATTACK_FRONT.gif",
+    attackLeft: "https://storage.googleapis.com/flutterflow-io-6f20.appspot.com/projects/the-green-cart-rahmnf/assets/mst9d68ui2ir/REAPER_ATTACK_LEFT.gif",
+    attackRight: "https://storage.googleapis.com/flutterflow-io-6f20.appspot.com/projects/the-green-cart-rahmnf/assets/nrmz9wqdmkup/REPEAR_ATTACK_RIGHT.gif",
+    attackUp: "https://storage.googleapis.com/flutterflow-io-6f20.appspot.com/projects/the-green-cart-rahmnf/assets/d2e5282rnzq5/REAPER_ATTACK_BACK.gif",
+    attackDown: "https://storage.googleapis.com/flutterflow-io-6f20.appspot.com/projects/the-green-cart-rahmnf/assets/l0he1jgxx03g/REAPER_ATTACK_FRONT.gif",
   };
 
   // How many monsters to spawn
