@@ -667,31 +667,31 @@ this.onMessage("player_request_respawn", async (client, data) => {
   spawnDefaultMonsters() {
   // Base monster template
   const baseMonster = {
-    name: "Orc Soldier",
-    class: "Beast",
+    name: "Skeleton Reaper",
+    class: "Ghost",
     level: 1,
     maxHP: 120,
-    attack: 35,
+    attack: 20,
     defense: 13,
-    speed: 8,
-    critDamage: 100,
+    speed: 5,
+    critDamage: 25,
     exp: 10,
     mapID: 1,
 
-    idleLeft: "https://i.ibb.co/93z4RPk8/Shadow-male-Assassin-Rogue-standing-in-a-poised-st-breathing-idle-west-1.gif",
-    idleRight: "https://i.ibb.co/XxVTbBxG/Shadow-male-Assassin-Rogue-standing-in-a-poised-st-breathing-idle-east-1.gif",
-    idleUp: "https://i.ibb.co/gFLNNQxv/Shadow-male-Assassin-Rogue-standing-in-a-poised-st-breathing-idle-north-1.gif",
-    idleDown: "https://i.ibb.co/zWptpc41/Shadow-male-Assassin-Rogue-standing-in-a-poised-st-breathing-idle-south-1.gif",
+    idleLeft: "https://storage.googleapis.com/flutterflow-io-6f20.appspot.com/projects/the-green-cart-rahmnf/assets/npgz8n4zfb3n/SKLL_IDLE_LEFT.gif",
+    idleRight: "https://storage.googleapis.com/flutterflow-io-6f20.appspot.com/projects/the-green-cart-rahmnf/assets/o75iz3ekiq2o/SKL_IDLE_RIGHT.gif",
+    idleUp: "https://storage.googleapis.com/flutterflow-io-6f20.appspot.com/projects/the-green-cart-rahmnf/assets/dx6bv3oj1svc/SKL_IDLE_BACK.gif",
+    idleDown: "https://storage.googleapis.com/flutterflow-io-6f20.appspot.com/projects/the-green-cart-rahmnf/assets/o7kmc3fx5ep6/SKL_IDLE_FRONT.gif",
 
-    walkLeft: "https://i.ibb.co/TqmN8GXx/Shadow-male-Assassin-Rogue-standing-in-a-poised-st-running-4-frames-west.gif",
-    walkRight: "https://i.ibb.co/gMVNP0mJ/Shadow-male-Assassin-Rogue-standing-in-a-poised-st-running-4-frames-east.gif",
-    walkUp: "https://i.ibb.co/Pvbx1mrQ/Shadow-male-Assassin-Rogue-standing-in-a-poised-st-running-4-frames-north.gif",
-    walkDown: "https://i.ibb.co/k6BWK4BQ/ezgif-com-animated-gif-maker-5.gif",
+    walkLeft: "https://storage.googleapis.com/flutterflow-io-6f20.appspot.com/projects/the-green-cart-rahmnf/assets/f0r0h4zso9hg/SKL_WALK_LEFT.gif",
+    walkRight: "https://storage.googleapis.com/flutterflow-io-6f20.appspot.com/projects/the-green-cart-rahmnf/assets/m5jcwxsy6b47/SKL_WALK_RIGHT.gif",
+    walkUp: "https://storage.googleapis.com/flutterflow-io-6f20.appspot.com/projects/the-green-cart-rahmnf/assets/ztxeac8qb221/SKL_WALK_BACK.gif",
+    walkDown: "https://storage.googleapis.com/flutterflow-io-6f20.appspot.com/projects/the-green-cart-rahmnf/assets/eudpdjxkvcaa/SKL_WALK_FRONT.gif",
 
-    attackLeft: "https://i.ibb.co/CKNkMfwb/Shadow-male-Assassin-Rogue-standing-in-a-poised-st-cross-punch-east2-ezgif-com-rotate.gif",
-    attackRight: "https://i.ibb.co/4gTn9xzM/Shadow-male-Assassin-Rogue-standing-in-a-poised-st-cross-punch-east-2.gif",
-    attackUp: "https://i.ibb.co/39B2HvNb/Shadow-male-Assassin-Rogue-standing-in-a-poised-st-cross-punch-north.gif",
-    attackDown: "https://i.ibb.co/M5sNBTyF/Shadow-male-Assassin-Rogue-standing-in-a-poised-st-cross-punch-south-1.gif",
+    attackLeft: "https://storage.googleapis.com/flutterflow-io-6f20.appspot.com/projects/the-green-cart-rahmnf/assets/sx0qtx2myj4k/SKL_ATTACK_LEFT.gif",
+    attackRight: "https://storage.googleapis.com/flutterflow-io-6f20.appspot.com/projects/the-green-cart-rahmnf/assets/wj7dmhdajknp/SKL_ATTACK_RIGHT.gif",
+    attackUp: "https://storage.googleapis.com/flutterflow-io-6f20.appspot.com/projects/the-green-cart-rahmnf/assets/g236h86sjc13/SKL_ATTACK_BACK.gif",
+    attackDown: "https://storage.googleapis.com/flutterflow-io-6f20.appspot.com/projects/the-green-cart-rahmnf/assets/tcblvdrpyha6/SKL_ATTACK_FRONT.gif",
   };
 
   // How many monsters to spawn
